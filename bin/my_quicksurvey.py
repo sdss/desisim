@@ -21,7 +21,7 @@ from collections import Counter
 from time import time, asctime
 
 import desitarget.mtl
-from desisim.quickcat import quickcat
+from desisim/summer_in_paris.quickcat import quickcat
 from astropy.table import join
 from desitarget.targets import desi_mask
 
