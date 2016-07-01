@@ -126,7 +126,21 @@ Fri Jul  1 02:16:20 2016 112 tiles to gather in zcat
 Fri Jul  1 02:16:33 2016 Finished zcat
 
 
-In this instance we had a very small galaxy sample (0<RA,10, -10<DEC <10), which used only 104+112=216 tiles.  The full run was split into two epochs.  
+In this instance we had a very small galaxy sample (0<RA,10, -10<DEC <10), which used only 104+112=216 tiles.  The full run was split into two epochs.  The output is in the output_dir: in the subdirectories /0 and /1, corresponding to the two epochs.  In /0 we find zcat.fits, mtl.fits, and the subdirectory fiberassign, which contains 104 files like tile_00141.fits.  The integer corresponds to the designation of the tile in the complete list of tiles covering the whole sky.  
+
+The mtl.fits file has columns:
+
+ ['TARGETID', 'BRICKNAME', 'RA', 'DEC', 'DESI_TARGET', 'BGS_TARGET', 'MWS_TARGET', 'SUBPRIORITY', 'NUMOBS_MORE', 'PRIORITY', 'GRAYLAYER']
+
+and 593965 rows.
+
+while the zcat.fits file has columns
+
+ ['TARGETID', 'BRICKNAME', 'Z', 'TYPE', 'NUMOBS', 'ZERR', 'ZWARN']
+
+and 226694 rows. The zcat.fits file in /1 contains 377110 rows.  The sum of the zcat files is longer than the input mtl file because some galaxies are observed more than once.
+
+
 
 License
 -------
