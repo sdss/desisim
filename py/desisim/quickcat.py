@@ -53,8 +53,36 @@ _z_range = {
     'SKY': (-0.005,0.005),
     'UNKNOWN': (0.,3.5),
 }
+def old_get_observed_redshifts(truetype, truez):
+    """
+        Returns observed z, zerr, zwarn arrays given true object types and redshifts
+        
+        Args:
+        truetype : array of ELG, LRG, QSO, STAR, SKY, or UNKNOWN
+        truez: array of true redshifts
+        
+        Returns tuple of (zout, zerr, zwarn)
+        
+        TODO: Add BGS, MWS support
+        """
+    zout = truez.copy()
+    zerr = np.zeros(len(truez), dtype=np.float32)
+    zwarn = np.zeros(len(truez), dtype=np.int32)
+    for objtype in _sigma_v.keys():
+        ii = (truetype == objtype)
+        n = np.count_nonzero(ii)
+        zerr[ii] = _sigma_v[objtype] * (1+truez[ii]) / c
+        zout[ii] += np.random.normal(scale=zerr[ii])
+        #- randomly select some objects to set zwarn
+        num_zwarn = int(_zwarn_fraction[objtype] * n)
+        if num_zwarn > 0:
+            jj = np.random.choice(np.where(ii)[0], size=num_zwarn, replace=False)
+            zwarn[jj] = 4
 
-def get_observed_redshifts(truetype, truez):
+return zout, zerr, zwarn
+
+
+def new_get_observed_redshifts(truetype, truez):
     """
     Returns observed z, zerr, zwarn arrays given true object types and redshifts
     
@@ -116,7 +144,7 @@ def get_observed_redshifts(truetype, truez):
         
     return zout, zerr, zwarn    
 
-def quickcat(tilefiles, targets, truth, zcat=None, perfect=False):
+def quickcat(tilefiles, targets, truth, zcat=None, perfect=False,newversion=True):
     """
     Generates quick output zcatalog
     
@@ -189,8 +217,10 @@ def quickcat(tilefiles, targets, truth, zcat=None, perfect=False):
         isELG = (objtype == 'GALAXY') & ((targets['DESI_TARGET'] & desi_mask.ELG) != 0)
         objtype[isLRG] = 'LRG'
         objtype[isELG] = 'ELG'
-        
-        z, zerr, zwarn = get_observed_redshifts(objtype, newzcat['Z'])
+        if(newersion):
+            z, zerr, zwarn = new_get_observed_redshifts(objtype, newzcat['Z'])
+        else:
+            z, zerr, zwarn = old_get_observed_redshifts(objtype, newzcat['Z'])
         newzcat['Z'] = z  #- update with noisy redshift
     else:
         zerr = np.zeros(nz, dtype=np.float32)
