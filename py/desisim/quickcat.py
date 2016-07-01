@@ -12,11 +12,13 @@ TODO:
 
 from __future__ import absolute_import, division, print_function
 
-import os
+import os.path
 from collections import Counter
 import numpy as np
 from astropy.io import fits
 from astropy.table import Table, Column
+from desispec.log import get_logger
+import sys
 
 import astropy.constants
 c = astropy.constants.c.to('km/s').value
@@ -43,6 +45,15 @@ _zwarn_fraction = {
     'UNKNOWN': 1.0,
 }
 
+_z_range = {
+    'ELG': (0.6,1.7),
+    'LRG': (0.4,1.2),
+    'QSO': (0.0,3.5),
+    'STAR': (-0.005,0.005),
+    'SKY': (-0.005,0.005),
+    'UNKNOWN': (0.,3.5),
+}
+
 def get_observed_redshifts(truetype, truez):
     """
     Returns observed z, zerr, zwarn arrays given true object types and redshifts
@@ -55,19 +66,53 @@ def get_observed_redshifts(truetype, truez):
 
     TODO: Add BGS, MWS support     
     """
+
+    log=get_logger()
     zout = truez.copy()
     zerr = np.zeros(len(truez), dtype=np.float32)
     zwarn = np.zeros(len(truez), dtype=np.int32)
-    for objtype in _sigma_v.keys():
-        ii = (truetype == objtype)
-        n = np.count_nonzero(ii)
-        zerr[ii] = _sigma_v[objtype] * (1+truez[ii]) / c
-        zout[ii] += np.random.normal(scale=zerr[ii])
-        #- randomly select some objects to set zwarn
-        num_zwarn = int(_zwarn_fraction[objtype] * n)
-        if num_zwarn > 0:
-            jj = np.random.choice(np.where(ii)[0], size=num_zwarn, replace=False)
-            zwarn[jj] = 4
+
+    #- reads lookup table from $DESI_ROOT/spectro/quickcat/zbest-zdc1-redmonster-MIX-5000.fits
+
+    desi_root = os.getenv('DESI_ROOT', '/project/projectdirs/desi')
+    quickcat_z_lookup = desi_root+'/'+'spectro/quickcat/'
+    file = os.path.join(quickcat_z_lookup,'zbest-zdc1-redmonster-MIX-5000.fits')
+    try :
+        zb_hdulist=fits.open(file)
+    except :
+        log.error("can not open file %s:"%file)
+        zb_hdulist.close()
+        sys.exit(12)
+
+    zb_name = zb_hdulist[1].name
+    zb=zb_hdulist[zb_name].data
+
+    #- matches redmonster types with DESI target classes
+    for objtype in _z_range.keys():
+        if ((objtype == 'ELG') | (objtype == 'LRG')):
+            rmtype = 'ssp_em_galaxy'
+        elif ((objtype == 'STAR') | (objtype == 'SKY') | (objtype == 'QSO_BAD')):
+            rmtype = 'spEigenStar'
+        else:
+            rmtype = objtype
+
+        ii, = np.where(truetype == objtype)
+        jj, = np.where((zb['ZBTYPE'] == rmtype))
+
+    #- matches truez with lookup table by target class by looking for the closest redshift from truez
+        for i in ii:
+            if (len(jj) != 0): #
+                newzb = zb[jj]
+                diffz = np.abs(newzb['ZBTRUEZ']-truez[i])
+                iz, = np.where(diffz == np.min(diffz))
+                if (len(iz)>1): iz = np.random.choice(iz,1)
+                assert (len(iz)==1),"There should be only one match" #- if more than one match, choose one at random
+                zmatch = newzb['ZBTRUEZ'][iz]
+                #- fills output catalog
+                zout[i] = truez[i]+(newzb['ZBFITZ'][iz]-newzb['ZBTRUEZ'][iz])
+                zerr[i] =  newzb['ZBZERR'][iz]
+                zwarn[i] = newzb['ZBZWARN'][iz]
+
         
     return zout, zerr, zwarn    
 
