@@ -65,6 +65,7 @@ def old_get_observed_redshifts(truetype, truez):
         
         TODO: Add BGS, MWS support
         """
+    print('old version')
     zout = truez.copy()
     zerr = np.zeros(len(truez), dtype=np.float32)
     zwarn = np.zeros(len(truez), dtype=np.int32)
@@ -79,7 +80,7 @@ def old_get_observed_redshifts(truetype, truez):
             jj = np.random.choice(np.where(ii)[0], size=num_zwarn, replace=False)
             zwarn[jj] = 4
 
-return zout, zerr, zwarn
+    return zout, zerr, zwarn
 
 
 def new_get_observed_redshifts(truetype, truez):
@@ -94,7 +95,7 @@ def new_get_observed_redshifts(truetype, truez):
 
     TODO: Add BGS, MWS support     
     """
-
+    print('new version')
     log=get_logger()
     zout = truez.copy()
     zerr = np.zeros(len(truez), dtype=np.float32)
@@ -164,6 +165,9 @@ def quickcat(tilefiles, targets, truth, zcat=None, perfect=False,newversion=True
         
     TODO: Add BGS, MWS support     
     """
+
+
+
     #- convert to Table for easier manipulation
     truth = Table(truth)
     
@@ -217,7 +221,8 @@ def quickcat(tilefiles, targets, truth, zcat=None, perfect=False,newversion=True
         isELG = (objtype == 'GALAXY') & ((targets['DESI_TARGET'] & desi_mask.ELG) != 0)
         objtype[isLRG] = 'LRG'
         objtype[isELG] = 'ELG'
-        if(newersion):
+        print('version choice')
+        if(newversion):
             z, zerr, zwarn = new_get_observed_redshifts(objtype, newzcat['Z'])
         else:
             z, zerr, zwarn = old_get_observed_redshifts(objtype, newzcat['Z'])

@@ -25,6 +25,7 @@ from desisim.quickcat import quickcat
 from astropy.table import join
 from desitarget.targets import desi_mask
 
+
 class SimSetup(object):
     """Setup to simulate the DESI survey
     
@@ -314,7 +315,7 @@ class SimSetup(object):
 
             self.create_fiberassign_input()
 
-            truth, targets, mtl, zcat = self.simulate_epoch(perfect=True, epoch_id = self.epochs_list[epoch], 
+            truth, targets, mtl, zcat = self.simulate_epoch(perfect=False, epoch_id = self.epochs_list[epoch], 
                                                             truth=truth, targets=targets, mtl=mtl, zcat=zcat)
 
             self.backup_epoch_data(epoch_id = self.epochs_list[epoch])
