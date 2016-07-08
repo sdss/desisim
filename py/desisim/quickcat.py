@@ -19,6 +19,7 @@ from astropy.io import fits
 from astropy.table import Table, Column
 from desispec.log import get_logger
 import sys
+from operator import itemgetter, attrgetter, methodcaller
 
 import astropy.constants
 c = astropy.constants.c.to('km/s').value
@@ -144,6 +145,98 @@ def new_get_observed_redshifts(truetype, truez):
 
         
     return zout, zerr, zwarn    
+def very_new_get_observed_redshifts(truetype, truez):
+    """
+    Returns observed z, zerr, zwarn arrays given true object types and redshifts
+    
+    Args:
+        truetype : array of ELG, LRG, QSO, STAR, SKY, or UNKNOWN
+        truez: array of true redshifts
+        
+    Returns tuple of (zout, zerr, zwarn)
+
+    TODO: Add BGS, MWS support     
+    """
+    print('very new version')
+    log=get_logger()
+    zout = truez.copy()
+    zerr = np.zeros(len(truez), dtype=np.float32)
+    zwarn = np.zeros(len(truez), dtype=np.int32)
+
+    #- reads lookup table from $DESI_ROOT/spectro/quickcat/sorted_true_elgs.fits
+
+    desi_root = os.getenv('DESI_ROOT', '/project/projectdirs/desi')
+    quickcat_z_lookup = desi_root+'/'+'spectro/quickcat/'
+    file = os.path.join(quickcat_z_lookup,'sorted_elgs.fits')
+    try :
+        zb_hdulist=fits.open(file)
+    except :
+        log.error("can not open file %s:"%file)
+        zb_hdulist.close()
+        sys.exit(12)
+
+    newzb=zb_hdulist[1].data
+    zarray=newzb['ZBTRUEZ']
+    number_templates=len(zarray)
+    ii=(newzb['ZBTYPE']=='ssp_em_galaxy')
+    truezarray=newzb[ii]['ZBTRUEZ']
+
+    bin_delta=0.5e-3
+    zmin=np.amin(truezarray)
+    zmax=np.amax(truezarray)
+    number_bins=int((zmax-zmin)/bin_delta)+1
+
+#   put lookup table lines into bins
+    print(" min %f max %f "%(zmin,zmax))
+    A=[]
+    x=zmin
+    B=[]
+    template=0
+    for i in range(number_bins):
+        B.append(template)
+    
+        while(template<number_templates and zarray[template+1]<x+bin_delta):
+            template=template+1
+            B.append(template)
+ 
+        A.append(B)
+        x=x+bin_delta
+        B=[]
+    print(' len A %d'%len(A))
+    print( A[len(A)-1])
+    ii, = np.where(truetype == 'ELG')
+    for i in ii:
+        zin=truez[i]
+        if(zin>zmax or zin<zmin):
+            #print('bad z  %f'%zin)
+            
+            zout[i]=0.
+            zerr[i]=0.
+            zwarn[i]=4
+        else:    
+            bin_find=int(  (zin-zmin  )/bin_delta)  
+            if(bin_find>number_bins):
+                print('z %f bin_find %d'%(z,bin_find))
+                zout[i]=0.
+                zerr[i]=0.
+                zwarn[i]=4
+            else:
+                choices=A[bin_find]
+                right_choice=choices[0]
+                if len(choices)!=1:
+                    for j in range(len(choices)):
+                        if zin>zarray[choices[j]]:
+                            right_choice=choices[j]
+                        else:
+                            break
+
+
+                zout[i] = truez[i]+(newzb['ZBFITZ'][right_choice]-newzb['ZBTRUEZ'][right_choice])
+                zerr[i] =  newzb['ZBZERR'][right_choice]
+                zwarn[i] = newzb['ZBZWARN'][right_choice]
+
+        
+    return zout, zerr, zwarn    
 
 def quickcat(tilefiles, targets, truth, zcat=None, perfect=False,newversion=True):
     """
@@ -223,7 +316,7 @@ def quickcat(tilefiles, targets, truth, zcat=None, perfect=False,newversion=True
         objtype[isELG] = 'ELG'
         print('version choice')
         if(newversion):
-            z, zerr, zwarn = new_get_observed_redshifts(objtype, newzcat['Z'])
+            z, zerr, zwarn = very_new_get_observed_redshifts(objtype, newzcat['Z'])
         else:
             z, zerr, zwarn = old_get_observed_redshifts(objtype, newzcat['Z'])
         newzcat['Z'] = z  #- update with noisy redshift
