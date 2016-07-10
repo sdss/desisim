@@ -297,7 +297,11 @@ def quickcat(tilefiles, targets, truth, zcat=None, perfect=False,newversion=True
     #- Copy TRUEZ -> Z so that we can add errors without altering original
     newzcat['Z'] = truth['TRUEZ'].copy()
     newzcat['TYPE'] = truth['TRUETYPE'].copy()
-
+    # rnc add RA and DEC
+    newzcat['RA'] = truth['RA'].copy()
+    newzcat['DEC'] = truth['DEC'].copy() 
+    # rnc add CATEGORY
+    newzcat['CATEGORY']=truth['CATEGORY'].copy()
     #- Add numobs column
     ### print('Adding NUMOBS column')
     nz = len(newzcat)
