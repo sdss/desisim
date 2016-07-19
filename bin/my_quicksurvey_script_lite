@@ -1,0 +1,16 @@
+#!/bin/bash -l
+
+#SBATCH -p debug
+#SBATCH -N 1
+#SBATCH -t 0:30:00
+
+cd $SLURM_SUBMIT_DIR
+
+if [ $NERSC_HOST == "cori" ]
+then export OMP_NUM_THREADS=32
+fi
+if [ $NERSC_HOST == "edison" ]
+then export OMP_NUM_THREADS=24
+fi
+
+srun  ./my_quicksurvey --output_dir ~/desisim --targets_dir /project/projectdirs/desi/mocks/preliminary/mtl/v2/lite  --fiberassign_exec ~/garrigue/fiberassign/bin/fiberassign --epochs_dir ~/garrigue/fiberassign/test  --template_fiberassign ~/garrigue/fiberassign/test/quicksurvey_template.txt --n_epochs 1

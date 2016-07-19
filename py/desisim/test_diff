@@ -1,0 +1,10 @@
+#!/usr/bin/env python
+import astropy.io.fits as pyfits
+import numpy as np
+hudlist=pyfits.open('/project/projectdirs/desi/spectro/quickcat/sorted_true_elgs.fits')
+zarray=hdulist[1].data['ZBTRUEZ']
+diff=1.
+for i in range(len(zarray)-1):
+    if(np.abs(zarray[i]-zarray[i+1]))<diff:
+        diff=np.abs(zarray[i]-zarray[i+1])
+print diff    
