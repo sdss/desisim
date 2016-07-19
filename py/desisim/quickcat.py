@@ -238,7 +238,7 @@ def very_new_get_observed_redshifts(truetype, truez):
         
     return zout, zerr, zwarn    
 
-def quickcat(tilefiles, targets, truth, zcat=None, perfect=False,newversion=True):
+def quickcat(tilefiles, targets, truth, zcat=None, perfect=True,newversion=True):
     """
     Generates quick output zcatalog
     
