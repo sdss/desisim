@@ -238,7 +238,7 @@ def very_new_get_observed_redshifts(truetype, truez):
         
     return zout, zerr, zwarn    
 
-def quickcat(tilefiles, targets, truth, zcat=None, perfect=True,newversion=True):
+def quickcat(tilefiles, targets, truth, zcat=None, perfect=False,newversion=True):
     """
     Generates quick output zcatalog
     
@@ -311,6 +311,7 @@ def quickcat(tilefiles, targets, truth, zcat=None, perfect=True,newversion=True)
 
     #- Add ZERR and ZWARN
     ### print('Adding ZERR and ZWARN')
+    print ("perfect z? %s "%perfect)
     if not perfect:
         #- GALAXY -> ELG or LRG
         objtype = newzcat['TYPE'].copy()
@@ -318,11 +319,7 @@ def quickcat(tilefiles, targets, truth, zcat=None, perfect=True,newversion=True)
         isELG = (objtype == 'GALAXY') & ((targets['DESI_TARGET'] & desi_mask.ELG) != 0)
         objtype[isLRG] = 'LRG'
         objtype[isELG] = 'ELG'
-        print('version choice')
-        if(newversion):
-            z, zerr, zwarn = very_new_get_observed_redshifts(objtype, newzcat['Z'])
-        else:
-            z, zerr, zwarn = old_get_observed_redshifts(objtype, newzcat['Z'])
+        z, zerr, zwarn = very_new_get_observed_redshifts(objtype, newzcat['Z'])
         newzcat['Z'] = z  #- update with noisy redshift
     else:
         zerr = np.zeros(nz, dtype=np.float32)
