@@ -6,6 +6,14 @@ vanilla survey strategy
 import desisim.quicksurvey as qs
 import argparse 
 
+
+import inspect
+from desisim.quickcat import quickcat
+import sys
+print("quickcat is there : %s"%inspect.getfile(quickcat))
+#sys.exit(12)
+
+
 parser = argparse.ArgumentParser(description="Quick and simplified simulation of a DESI survey")
 
 parser.add_argument("--output_dir", "-O", help="Path to write the outputs", type=str, default="./")

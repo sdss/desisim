@@ -236,14 +236,17 @@ class SimSetup(object):
         if targets is None:
             targets = Table.read(os.path.join(self.targets_path,'targets.fits'))
             print("number of targets {}".format(len(targets)))
+ 
         self.mtl_file = os.path.join(self.tmp_output_path, 'mtl.fits')    
         print("{} Starting MTL".format(asctime()))
         if self.zcat_file is None:            
             mtl = desitarget.mtl.make_mtl(targets)
+            mtl_initial = mtl
             mtl.write(self.mtl_file, overwrite=True)
             print("number of objects in mtl {}".format(len(mtl)))
         else:
             #zcat = Table.read(self.zcat_file, format='fits')
+
             mtl = desitarget.mtl.make_mtl(targets, zcat)
             mtl.write(self.mtl_file, overwrite=True)
         print("{} Finished MTL".format(asctime()))
@@ -256,8 +259,7 @@ class SimSetup(object):
             
         # launch fiberassign
         print("{} Launching fiberassign".format(asctime()))
-        #p = subprocess.call([self.fiberassign_exec, os.path.join(self.tmp_output_path, 'fa_features.txt')], stdout=subprocess.PIPE)
-        p = subprocess.check_output([self.fiberassign_exec, os.path.join(self.tmp_output_path, 'fa_features.txt')])
+        p = subprocess.call([self.fiberassign_exec, os.path.join(self.tmp_output_path, 'fa_features.txt')], stdout=subprocess.PIPE)
 
         print("{} Finished fiberassign".format(asctime()))
 
@@ -322,6 +324,8 @@ class SimSetup(object):
             self.backup_epoch_data(epoch_id = self.epochs_list[epoch])
 
             self.reset_lists()
+            
+            
 
         self.cleanup_directories()
 
