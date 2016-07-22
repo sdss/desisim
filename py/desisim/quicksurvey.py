@@ -259,6 +259,10 @@ class SimSetup(object):
             
         # launch fiberassign
         print("{} Launching fiberassign".format(asctime()))
+        #know mtl by now
+        elg=((mtl['DESI_TARGET'] & desi_mask.ELG) != 0)
+        more=(mtl['NUMOBS_MORE']>0)
+        print ("ELGs in mtl needing observation %d"%len(mtl[elg & more]))
         p = subprocess.call([self.fiberassign_exec, os.path.join(self.tmp_output_path, 'fa_features.txt')], stdout=subprocess.PIPE)
 
         print("{} Finished fiberassign".format(asctime()))
@@ -279,8 +283,9 @@ class SimSetup(object):
             tilename = os.path.join(self.tmp_fiber_path, 'tile_%05d.fits'%(i))
             if os.path.isfile(tilename):
                 self.tilefiles.append(tilename)
-                    #else:
-#print('Suggested but does not exist {}'.format(tilename))
+                #print ("tile %s "%tilename)
+            #else:
+                #print('Suggested but does not exist {}'.format(tilename))
         print("{} {} tiles to gather in zcat".format(asctime(), len(self.tilefiles)))
     
         # write the zcat, it uses the tilesfiles constructed in the last step
@@ -327,7 +332,7 @@ class SimSetup(object):
             
             
 
-        self.cleanup_directories()
+        #self.cleanup_directories()
 
 
 
