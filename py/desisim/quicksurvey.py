@@ -266,7 +266,7 @@ class SimSetup(object):
         p = subprocess.call([self.fiberassign_exec, os.path.join(self.tmp_output_path, 'fa_features.txt')], stdout=subprocess.PIPE)
 
         print("{} Finished fiberassign".format(asctime()))
-
+        
 
         #create a list of fibermap tiles to read and update zcat
         # find first the set of tiles corresponding to this epoch
@@ -276,7 +276,7 @@ class SimSetup(object):
             self.tile_ids = np.append(self.tile_ids, np.loadtxt(epochfile))
 
         self.tile_ids = np.int_(self.tile_ids)
-
+        print ("number of tiles this epoch %d"%len(self.tile_ids))
         # finally add the corresponding tiles to the list of fibermap files to read
         self.tilefiles = []
         for i in self.tile_ids:
