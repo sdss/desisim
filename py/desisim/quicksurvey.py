@@ -211,7 +211,7 @@ class SimSetup(object):
         fx.write(params.format(inputdir = self.tmp_output_path, targetdir = self.targets_path))
         fx.close()
         
-    def simulate_epoch(self, perfect=False, epoch_id=0, truth=None, targets=None, mtl=None, zcat=None):
+    def simulate_epoch(self, perfect=True, epoch_id=0, truth=None, targets=None, mtl=None, zcat=None):
         """Core routine simulating a DESI epoch, 
 
         Args:
