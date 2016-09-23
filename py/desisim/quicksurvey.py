@@ -332,6 +332,9 @@ class SimSetup(object):
             truth, targets, mtl, zcat = self.simulate_epoch(perfect=False, epoch_id = self.epochs_list[epoch], 
                                                             truth=truth, targets=targets, mtl=mtl, zcat=zcat)
 
+            #get summary
+            self.summary_setup()
+
             self.backup_epoch_data(epoch_id = self.epochs_list[epoch])
 
             self.reset_lists()
