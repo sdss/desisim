@@ -500,7 +500,7 @@ class TargetTile(object):
             self.n_observed = fin[1].data['NOBS']
             self.assigned_z = fin[1].data['ASSIGNEDZ']
             self.assigned_type =  fin[1].data['ASSIGNEDTYPE']
-        except Exception, e:
+        except Exception as e:
             import traceback
             print('ERROR in get_tiles')
             traceback.print_exc()

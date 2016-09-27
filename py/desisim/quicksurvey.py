@@ -333,7 +333,7 @@ class SimSetup(object):
                                                             truth=truth, targets=targets, mtl=mtl, zcat=zcat)
 
             #get summary
-            self.summary_setup()
+            summary_setup(self)
 
             self.backup_epoch_data(epoch_id = self.epochs_list[epoch])
 
@@ -348,6 +348,9 @@ class SimSetup(object):
 
 def print_efficiency_stats(truth, mtl_initial, zcat):
     print('Overall efficiency')
+    print(" truth length {} ".format(len(truth)))
+    print(" mtl length {} ".format(len(mtl_initial)))
+
     tmp_init = join(mtl_initial, truth, keys='TARGETID')    
     total = join(zcat, tmp_init, keys='TARGETID')
 
