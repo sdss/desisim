@@ -263,10 +263,11 @@ def quickcat(tilefiles, targets, truth, zcat=None, perfect=False,newversion=True
 
     #- convert to Table for easier manipulation
     truth = Table(truth)
-    
+    print("length of truth %d"%len(truth))
     #- Count how many times each target was observed for this set of tiles
     ### print('Reading {} tiles'.format(len(obstiles)))
     nobs = Counter()
+    print(" number of tilefiles %d" %len(tilefiles))
     for infile in tilefiles:
         fibassign = fits.getdata(infile, 'FIBER_ASSIGNMENTS')
         ii = (fibassign['TARGETID'] != -1)  #- targets with assignments
@@ -284,11 +285,13 @@ def quickcat(tilefiles, targets, truth, zcat=None, perfect=False,newversion=True
     obs_targetids = np.array(nobs.keys())
     iiobs = np.in1d(truth['TARGETID'], obs_targetids)
     truth = truth[iiobs]
+    print("length of truth after iiobs %d" %len(truth))
     targets = targets[iiobs]
 
     #- Construct initial new z catalog
     newzcat = Table()
     newzcat['TARGETID'] = truth['TARGETID']
+    print ("length of newzcat after TARGETID %d"%len(newzcat))
     if 'BRICKNAME' in truth.dtype.names:
         newzcat['BRICKNAME'] = truth['BRICKNAME']
     else:
@@ -305,6 +308,7 @@ def quickcat(tilefiles, targets, truth, zcat=None, perfect=False,newversion=True
     #- Add numobs column
     ### print('Adding NUMOBS column')
     nz = len(newzcat)
+    print(" nz  %d" %nz)
     newzcat.add_column(Column(name='NUMOBS', length=nz, dtype=np.int32))
     for i in range(nz):
         newzcat['NUMOBS'][i] = nobs[newzcat['TARGETID'][i]]
@@ -327,9 +331,9 @@ def quickcat(tilefiles, targets, truth, zcat=None, perfect=False,newversion=True
 
     newzcat['ZERR'] = zerr
     newzcat['ZWARN'] = zwarn
-
+   
     #- Metadata for header
     newzcat.meta['EXTNAME'] = 'ZCATALOG'
-
+    print(" galaxies in zcat %d" %len(newzcat))
     return newzcat
 
