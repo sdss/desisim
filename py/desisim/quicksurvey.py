@@ -10,6 +10,7 @@ Direclty Depends on the following desiproducts
 
 from __future__ import absolute_import, division, print_function
 
+import sys
 import numpy as np
 import os
 import shutil
@@ -233,24 +234,38 @@ class SimSetup(object):
         if truth is None:
             truth = Table.read(os.path.join(self.targets_path,'truth.fits'))
             print("number of truth targets {}".format(len(truth)))
+        print("at if truth is none")    
+        #try to flush stdout
+        sys.stdout.flush()
         if targets is None:
             targets = Table.read(os.path.join(self.targets_path,'targets.fits'))
             print("number of targets {}".format(len(targets)))
+        print("at if target is none")    
+        #try to flush stdout
+        sys.stdout.flush()
  
         self.mtl_file = os.path.join(self.tmp_output_path, 'mtl.fits')    
         print("{} Starting MTL".format(asctime()))
+
+        #try to flush stdout
+        sys.stdout.flush()
         if self.zcat_file is None:            
             mtl = desitarget.mtl.make_mtl(targets)
             mtl_initial = mtl
             mtl.write(self.mtl_file, overwrite=True)
             print("number of objects in mtl {}".format(len(mtl)))
+            sys.stdout.flush()
         else:
             #zcat = Table.read(self.zcat_file, format='fits')
-
+            print("before mtl.make_mtl")
+            sys.stdout.flush()
             mtl = desitarget.mtl.make_mtl(targets, zcat)
             mtl.write(self.mtl_file, overwrite=True)
+            print("after make_mtl")
+            sys.stdout.flush()
+        
         print("{} Finished MTL".format(asctime()))
-
+        sys.stdout.flush()
         # clean all fibermap fits files before running fiberassing
         tilefiles = sorted(glob.glob(self.tmp_fiber_path+'/tile*.fits'))
         if tilefiles:
@@ -316,21 +331,28 @@ class SimSetup(object):
         truth=targets=mtl=zcat=None
         for epoch in self.epochs_list:
             print('Epoch number {}'.format(epoch))
+            #try to flush stdout
+            sys.stdout.flush()
+
 
             self.set_mtl_epochs(epochs_list = self.epochs_list[epoch:])
             #rnc
             print("mtl epochs {}".format(self.mtl_epochs))
-
+            sys.stdout.flush()
             self.set_fiber_epochs(epochs_list = self.epochs_list[epoch])
-            
+        
             print("fiber epochs {}".format(self.fiber_epochs))
-
+            sys.stdout.flush()    
             self.create_surveyfile()
-
+            print("between creates")
+            sys.stdout.flush()   
             self.create_fiberassign_input()
-
+            print("before simulate")
+            sys.stdout.flush() 
             truth, targets, mtl, zcat = self.simulate_epoch(perfect=False, epoch_id = self.epochs_list[epoch], 
                                                             truth=truth, targets=targets, mtl=mtl, zcat=zcat)
+            #try to flush stdout
+            sys.stdout.flush()
 
             #get summary
             #summary_setup(self)
