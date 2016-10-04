@@ -282,8 +282,8 @@ def quickcat(tilefiles, targets, truth, zcat=None, perfect=False,newversion=True
 
     #- Trim truth down to just ones that have already been observed
     ### print('Trimming truth to just observed targets')
-    obs_targetids = np.array(list(nobs.keys()))
-    
+    obs_targetids = np.array(list(nobs))
+    print("len obs_targetids %d"%len(obs_targetids))
 
     iiobs = np.in1d(truth['TARGETID'], obs_targetids)
    
