@@ -40,7 +40,7 @@ _sigma_v = {
 _zwarn_fraction = {
     'ELG': 0.14,       # 1 - 4303/5000
     'LRG': 0.015,      # 1 - 4921/5000
-    'QSO': 0.18,       # 1 - 4094/5000 
+    'QSO': 0.18,       # 1 - 4094/5000
     'STAR': 0.238,     # 1 - 3811/5000
     'SKY': 1.0,
     'UNKNOWN': 1.0,
@@ -56,6 +56,7 @@ _z_range = {
 }
 def old_get_observed_redshifts(truetype, truez):
     """
+
         Returns observed z, zerr, zwarn arrays given true object types and redshifts
         
         Args:
@@ -67,10 +68,11 @@ def old_get_observed_redshifts(truetype, truez):
         TODO: Add BGS, MWS support
         """
     print('old version')
+
     zout = truez.copy()
     zerr = np.zeros(len(truez), dtype=np.float32)
     zwarn = np.zeros(len(truez), dtype=np.int32)
-    for objtype in _sigma_v.keys():
+    for objtype in _sigma_v:
         ii = (truetype == objtype)
         n = np.count_nonzero(ii)
         zerr[ii] = _sigma_v[objtype] * (1+truez[ii]) / c
@@ -181,6 +183,7 @@ def very_new_get_observed_redshifts(truetype, truez):
     ii=(newzb['ZBTYPE']=='ssp_em_galaxy')
     truezarray=newzb[ii]['ZBTRUEZ']
 
+
     bin_delta=0.5e-3
     zmin=np.amin(truezarray)
     zmax=np.amax(truezarray)
@@ -241,29 +244,27 @@ def very_new_get_observed_redshifts(truetype, truez):
 def quickcat(tilefiles, targets, truth, zcat=None, perfect=False,newversion=True):
     """
     Generates quick output zcatalog
-    
+
     Args:
         tilefiles : list of fiberassign tile files that were observed
         targets : astropy Table of targets
         truth : astropy Table of input truth with columns TARGETID, TRUEZ, and TRUETYPE
-        
-    Options:
-        zcat : input zcatalog Table from previous observations
-        perfect : if True, treat spectro pipeline as perfect with input=output,
+        zcat (Optional): input zcatalog Table from previous observations
+        perfect (Optional): if True, treat spectro pipeline as perfect with input=output,
             otherwise add noise and zwarn!=0 flags
         
     Returns:
         zcatalog astropy Table based upon input truth, plus ZERR, ZWARN,
-        NUMOBS, and TYPE columns   
-        
-    TODO: Add BGS, MWS support     
+        NUMOBS, and TYPE columns
+
+    TODO: Add BGS, MWS support
     """
 
 
 
     #- convert to Table for easier manipulation
     truth = Table(truth)
-    print("length of truth %d"%len(truth))
+
     #- Count how many times each target was observed for this set of tiles
     ### print('Reading {} tiles'.format(len(obstiles)))
     nobs = Counter()
@@ -282,6 +283,7 @@ def quickcat(tilefiles, targets, truth, zcat=None, perfect=False,newversion=True
 
     #- Trim truth down to just ones that have already been observed
     ### print('Trimming truth to just observed targets')
+
     obs_targetids = np.array(list(nobs))
     print("len obs_targetids %d"%len(obs_targetids))
 
@@ -299,16 +301,15 @@ def quickcat(tilefiles, targets, truth, zcat=None, perfect=False,newversion=True
     if 'BRICKNAME' in truth.dtype.names:
         newzcat['BRICKNAME'] = truth['BRICKNAME']
     else:
-        newzcat['BRICKNAME'] = np.zeros(len(truth), dtype='S8')
+        newzcat['BRICKNAME'] = np.zeros(len(truth), dtype=(str, 8))
 
     #- Copy TRUEZ -> Z so that we can add errors without altering original
     newzcat['Z'] = truth['TRUEZ'].copy()
+
     newzcat['TYPE'] = truth['TRUETYPE'].copy()
     # rnc add RA and DEC
     newzcat['RA'] = truth['RA'].copy()
     newzcat['DEC'] = truth['DEC'].copy() 
-    # rnc add CATEGORY
-    #newzcat['CATEGORY']=truth['CATEGORY'].copy()
     #- Add numobs column
     ### print('Adding NUMOBS column')
     nz = len(newzcat)
@@ -322,12 +323,14 @@ def quickcat(tilefiles, targets, truth, zcat=None, perfect=False,newversion=True
     print ("perfect z? %s "%perfect)
     if not perfect:
         #- GALAXY -> ELG or LRG
-        objtype = newzcat['TYPE'].copy()
+        objtype = newzcat['SPECTYPE'].copy()
         isLRG = (objtype == 'GALAXY') & ((targets['DESI_TARGET'] & desi_mask.LRG) != 0)
         isELG = (objtype == 'GALAXY') & ((targets['DESI_TARGET'] & desi_mask.ELG) != 0)
         objtype[isLRG] = 'LRG'
         objtype[isELG] = 'ELG'
+
         z, zerr, zwarn = very_new_get_observed_redshifts(objtype, newzcat['Z'])
+
         newzcat['Z'] = z  #- update with noisy redshift
     else:
         zerr = np.zeros(nz, dtype=np.float32)
@@ -340,4 +343,3 @@ def quickcat(tilefiles, targets, truth, zcat=None, perfect=False,newversion=True
     newzcat.meta['EXTNAME'] = 'ZCATALOG'
     print(" galaxies in zcat %d" %len(newzcat))
     return newzcat
-

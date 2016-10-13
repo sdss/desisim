@@ -11,7 +11,10 @@ import string
 import numpy as np
 import yaml
 
+from astropy.table import Table, Column, hstack
+
 from desimodel.focalplane import FocalPlane
+from desisim.io import empty_metatable
 import desimodel.io
 from desispec.log import get_logger
 log = get_logger()
@@ -30,16 +33,14 @@ def sample_objtype(nobj, flavor):
         nobj : number of objects to generate
 
     Returns:
-        (true_objtype, target_objtype)
-
-    where
-        true_objtype   : array of what type the objects actually are
-        target_objtype : array of type they were targeted as
+        (true_objtype, target_objtype) where true_objtype is the array of
+            what type the objects actually are and target_objtype is the
+            array of type they were targeted as
 
     Notes:
-    - Actual fiber assignment will result in higher relative fractions of
-      LRGs and QSOs in early passes and more ELGs in later passes.
-    - Also ensures at least 2 sky and 1 stdstar, even if nobj is small
+        - Actual fiber assignment will result in higher relative fractions of
+          LRGs and QSOs in early passes and more ELGs in later passes.
+        - Also ensures at least 2 sky and 1 stdstar, even if nobj is small
     """
     flavor = flavor.upper()
 
@@ -66,13 +67,13 @@ def sample_objtype(nobj, flavor):
     #- Number of science fibers available
     nsci = nobj - (nsky+nstd)
     true_objtype  = ['SKY']*nsky + ['STD']*nstd
-        
+
     if (flavor == 'MWS'):
         true_objtype  +=  ['MWS_STAR']*nsci
     elif (flavor == 'QSO'):
         true_objtype  +=  ['QSO']*nsci
     elif (flavor == 'ELG'):
-        true_objtype  +=  ['ELG']*nsci    
+        true_objtype  +=  ['ELG']*nsci
     elif (flavor == 'LRG'):
         true_objtype  +=  ['LRG']*nsci
     elif (flavor == 'STD'):
@@ -86,10 +87,10 @@ def sample_objtype(nobj, flavor):
         ntgt = float(tgt['nobs_BG'] + tgt['nobs_MWS'])
         prob_bgs = tgt['nobs_BG'] / ntgt
         prob_mws = 1 - prob_bgs
-        
+
         p = [prob_bgs, prob_mws]
         nbgs, nmws = np.random.multinomial(nsci, p)
-        
+
         true_objtype += ['BGS']*nbgs
         true_objtype += ['MWS_STAR']*nmws
     elif (flavor == 'DARK'):
@@ -99,7 +100,7 @@ def sample_objtype(nobj, flavor):
         prob_elg = tgt['nobs_elg'] / ntgt
         prob_qso = (tgt['nobs_qso'] + tgt['nobs_lya']) / ntgt
         prob_badqso = tgt['ntarget_badqso'] / ntgt
-        
+
         p = [prob_lrg, prob_elg, prob_qso, prob_badqso]
         nlrg, nelg, nqso, nbadqso = np.random.multinomial(nsci, p)
 
@@ -113,7 +114,7 @@ def sample_objtype(nobj, flavor):
         true_objtype = ['SKY',] * nobj
     else:
         raise ValueError("Do not know the objtype mix for flavor "+ flavor)
-        
+
     assert len(true_objtype) == nobj, \
         'len(true_objtype) mismatch for flavor {} : {} != {}'.format(\
         flavor, len(true_objtype), nobj)
@@ -135,7 +136,7 @@ def sample_objtype(nobj, flavor):
 def _wrap_get_targets(args):
     nspec, flavor, tileid, seed, specmin = args
     return get_targets(nspec, flavor, tileid, seed=seed, specmin=specmin)
-    
+
 def get_targets_parallel(nspec, flavor, tileid=None, nproc=None, seed=None):
     import multiprocessing as mp
     if nproc is None:
@@ -146,7 +147,7 @@ def get_targets_parallel(nspec, flavor, tileid=None, nproc=None, seed=None):
         log.debug('Not Parallelizing get_targets for only {} targets'.format(nspec))
         return get_targets(nspec, flavor, tileid, seed=seed)
     else:
-        nproc = min(nproc, nspec//10)        
+        nproc = min(nproc, nspec//10)
         log.debug('Parallelizing get_targets using {} cores'.format(nproc))
         args = list()
         n = nspec // nproc
@@ -161,11 +162,11 @@ def get_targets_parallel(nspec, flavor, tileid=None, nproc=None, seed=None):
 
         pool = mp.Pool(nproc)
         results = pool.map(_wrap_get_targets, args)
-        fibermaps, truthtables = zip(*results)
+        fibermaps, truthtables = list(zip(*results))
         fibermap = np.concatenate(fibermaps)
 
         truth = truthtables[0]
-        for key in truth.keys():
+        for key in truth:
             if key not in ('UNITS', 'WAVE'):
                 truth[key] = np.concatenate([t[key] for t in truthtables])
 
@@ -174,6 +175,87 @@ def get_targets_parallel(nspec, flavor, tileid=None, nproc=None, seed=None):
         fibermap['SPECTROID'] = fibermap['FIBER'] // 500
 
         return fibermap, truth
+
+#- Work in progress; don't use yet.
+def _simspec_truth(truth, wave=None, seed=None):
+    from astropy import table
+    #- Get DESI wavelength coverage
+    if wave is None:
+        wavemin = desimodel.io.load_throughput('b').wavemin
+        wavemax = desimodel.io.load_throughput('z').wavemax
+        dw = 0.2
+        wave = np.arange(round(wavemin, 1), wavemax, dw)
+
+    truetype = truth['TRUETYPE']
+    subtype = truth['TRUESUBTYPE']
+    isGAL = (truetype == 'GALAXY')
+    isQSO = (truetype == 'QSO')
+    isSTAR = (truetype == 'STAR')
+
+    isLRG = isGAL & (subtype == 'LRG')
+    isELG = isGAL & (subtype == 'ELG')
+    isBGS = isGAL & (subtype == 'BGS')
+    isMWS = isSTAR & (subtype == 'MWS')
+    isSTD = isSTAR & (subtype == 'FSTD')
+
+    isFakeQSO = isSTAR & (subtype == 'FAKE_QSO')
+    isFakeELG = isSTAR & (subtype == 'FAKE_ELG')
+    isFakeLRG = isSTAR & (subtype == 'FAKE_LRG')
+
+    #- did we cover all options?
+    x = isLRG | isELG | isBGS | isQSO | isMWS | isSTD
+    x |= isFakeQSO | isFakeELG | isFakeLRG
+    if np.any(~x):
+        unknown = set(zip(truetype[~x], subtype[~x]))
+        message = 'Unknown objtype types {}'.format(unknown)
+        log.fatal(message)
+        raise ValueError(message)
+
+    def make_templates(truth, template_class, wave, seed):
+        nobj = len(truth)
+        tx = template_class(wave=wave)
+        print('generating {} {} targets'.format(nobj, tx.objtype))
+        simflux, _x, meta = tx.make_templates(nmodel=nobj, seed=seed)
+        meta.add_column(table.Column(name='TARGETID', data=truth['TARGETID']))
+        return simflux, meta
+
+    from desisim.templates import LRG, ELG, QSO, BGS, MWS_STAR, FSTD
+
+    results = list()
+    if np.any(isLRG):
+        results.append( make_templates(truth[isLRG], LRG, wave, seed) )
+    if np.any(isELG):
+        results.append( make_templates(truth[isELG], ELG, wave, seed) )
+    if np.any(isQSO):
+        results.append( make_templates(truth[isQSO], QSO, wave, seed) )
+    if np.any(isBGS):
+        results.append( make_templates(truth[isBGS], BGS, wave, seed) )
+    if np.any(isMWS):
+        results.append( make_templates(truth[isMWS], MWS, wave, seed) )
+    if np.any(isSTD):
+        results.append( make_templates(truth[isSTD], FSTD, wave, seed) )
+    if np.any(isFakeQSO):
+        log.warn('not applying QSO color cuts to Fake QSOs yet')
+        results.append( make_templates(truth[isFakeQSO], MWS_STAR, wave, seed) )
+    if np.any(isFakeELG):
+        log.warn('not applying ELG color cuts to Fake ELGs yet')
+        results.append( make_templates(truth[isFakeELG], MWS_STAR, wave, seed) )
+    if np.any(isFakeLRG):
+        log.warn('not applying LRG color cuts to Fake LRGs yet')
+        results.append( make_templates(truth[isFakeLRG], MWS_STAR, wave, seed) )
+
+    simflux = np.vstack([x[0] for x in results])
+    simmeta = table.vstack([x[1] for x in results])
+
+    #- Sort to match order of input truth
+    #- Is there a way to do this without 3 argsort calls?
+    ii = np.argsort(np.asarray(truth['TARGETID']))
+    jj = np.argsort(np.asarray(simmeta['TARGETID']))
+    kk = np.argsort(ii)
+    simmeta = simmeta[jj[kk]]
+    simflux = simflux[jj[kk]]
+
+    return simflux, simmeta
 
 def get_targets(nspec, flavor, tileid=None, seed=None, specmin=0):
     """
@@ -194,7 +276,7 @@ def get_targets(nspec, flavor, tileid=None, seed=None, specmin=0):
 
     #- Get distribution of target types
     true_objtype, target_objtype = sample_objtype(nspec, flavor)
-    
+
     #- Get DESI wavelength coverage
     wavemin = desimodel.io.load_throughput('b').wavemin
     wavemax = desimodel.io.load_throughput('z').wavemax
@@ -204,17 +286,11 @@ def get_targets(nspec, flavor, tileid=None, seed=None, specmin=0):
 
     truth = dict()
     truth['FLUX'] = np.zeros( (nspec, len(wave)) )
-    truth['REDSHIFT'] = np.zeros(nspec, dtype='f4')
-    truth['TEMPLATEID'] = np.zeros(nspec, dtype='i4')
-    truth['OIIFLUX'] = np.zeros(nspec, dtype='f4')
-    truth['D4000'] = np.zeros(nspec, dtype='f4')
-    truth['VDISP'] = np.zeros(nspec, dtype='f4')
-    truth['OBJTYPE'] = np.zeros(nspec, dtype='S10')
-    #- Note: unlike other elements, first index of WAVE isn't spectrum index
+    truth['OBJTYPE'] = np.zeros(nspec, dtype=(str, 10))
+    ##- Note: unlike other elements, first index of WAVE isn't spectrum index
     truth['WAVE'] = wave
 
-    if flavor == 'BGS' or flavor == 'BRIGHT':
-        truth['HBETAFLUX'] = np.zeros(nspec, dtype='f4')
+    truth['META'] = empty_metatable(nmodel=nspec, objtype='SKY')
 
     fibermap = empty_fibermap(nspec)
 
@@ -258,8 +334,14 @@ def get_targets(nspec, flavor, tileid=None, seed=None, specmin=0):
         # For a "bad" QSO simulate a normal star without color cuts, which isn't
         # right. We need to apply the QSO color-cuts to the normal stars to pull
         # out the correct population of contaminating stars.
+
+        # Note by @moustakas: we can now do this using desisim/#150, but we are
+        # going to need 'noisy' photometry (because the QSO color-cuts
+        # explicitly avoid the stellar locus).
         elif objtype == 'QSO_BAD':
             from desisim.templates import STAR
+            #from desitarget.cuts import isQSO
+            #star = STAR(wave=wave, colorcuts_function=isQSO)
             star = STAR(wave=wave)
             simflux, wave1, meta = star.make_templates(nmodel=nobj, seed=seed)
             fibermap['DESI_TARGET'][ii] = desi_mask.QSO
@@ -280,33 +362,20 @@ def get_targets(nspec, flavor, tileid=None, seed=None, specmin=0):
 
         else:
             raise ValueError('Unable to simulate OBJTYPE={}'.format(objtype))
-            
+
         truth['FLUX'][ii] = 1e17 * simflux
         truth['UNITS'] = '1e-17 erg/s/cm2/A'
-        truth['TEMPLATEID'][ii] = meta['TEMPLATEID']
-        truth['REDSHIFT'][ii] = meta['REDSHIFT']
+        truth['META'][ii] = meta
 
-        # Pack in the photometry.  TODO: Include WISE.
-        magg = meta['GMAG']
-        magr = meta['RMAG']
-        magz = meta['ZMAG']
-        fibermap['MAG'][ii, 0:3] = np.vstack( [magg, magr, magz] ).T
-        fibermap['FILTER'][ii, 0:3] = ['DECAM_G', 'DECAM_R', 'DECAM_Z']
+        ugrizy = 22.5-2.5*np.log10(meta['DECAM_FLUX'].data)
+        wise = 22.5-2.5*np.log10(meta['WISE_FLUX'].data)
+        fibermap['FILTER'][ii, :6] = ['DECAM_G', 'DECAM_R', 'DECAM_Z', 'WISE_W1', 'WISE_W2']
+        fibermap['MAG'][ii, 0] = ugrizy[:, 1]
+        fibermap['MAG'][ii, 1] = ugrizy[:, 2]
+        fibermap['MAG'][ii, 2] = ugrizy[:, 4]
+        fibermap['MAG'][ii, 3] = wise[:, 0]
+        fibermap['MAG'][ii, 4] = wise[:, 1]
 
-        if objtype == 'ELG':
-            truth['OIIFLUX'][ii] = meta['OIIFLUX']
-            truth['D4000'][ii] = meta['D4000']
-            truth['VDISP'][ii] = meta['VDISP']
-
-        if objtype == 'LRG':
-            truth['D4000'][ii] = meta['D4000']
-            truth['VDISP'][ii] = meta['VDISP']
-
-        if objtype == 'BGS':            
-            truth['HBETAFLUX'][ii] = meta['HBETAFLUX']
-            truth['D4000'][ii] = meta['D4000']
-            truth['VDISP'][ii] = meta['VDISP']
-            
     #- Load fiber -> positioner mapping and tile information
     fiberpos = desimodel.io.load_fiberpos()
 
@@ -323,8 +392,8 @@ def get_targets(nspec, flavor, tileid=None, seed=None, specmin=0):
     fibermap['FIBER'] = np.arange(nspec, dtype='i4')
     fibermap['POSITIONER'] = fiberpos['POSITIONER'][specmin:specmin+nspec]
     fibermap['SPECTROID'] = fiberpos['SPECTROGRAPH'][specmin:specmin+nspec]
-    fibermap['TARGETID'] = np.random.randint(sys.maxint, size=nspec)
-    fibermap['TARGETCAT'] = np.zeros(nspec, dtype='|S20')
+    fibermap['TARGETID'] = np.random.randint(sys.maxsize, size=nspec)
+    fibermap['TARGETCAT'] = np.zeros(nspec, dtype=(str, 20))
     fibermap['LAMBDAREF'] = np.ones(nspec, dtype=np.float32)*5400
     fibermap['RA_TARGET'] = ra
     fibermap['DEC_TARGET'] = dec
@@ -339,7 +408,6 @@ def get_targets(nspec, flavor, tileid=None, seed=None, specmin=0):
     fibermap['BRICKNAME'] = brick.brickname(ra, dec)
 
     return fibermap, truth
-
 
 #-------------------------------------------------------------------------
 #- Currently unused, but keep around for now
@@ -378,206 +446,3 @@ def sample_nz(objtype, n):
     #- Sample that distribution
     x = np.random.uniform(0.0, 1.0, size=n)
     return np.interp(x, cdf, zhi)
-
-class TargetTile(object):
-    """
-    Keeps the relevant information for targets on a tile.
-    Attributes:
-         The properties initialized in the __init__ procedure:
-         ra (float): array for the target's RA
-         dec (float): array for the target's dec
-         type (string): array for the type of target
-         id (int): array of unique IDs for each target
-         tile_ra (float): RA identifying the tile's center
-         tile_dec (float) : dec identifying the tile's center
-         tile_id (int): ID identifying the tile's ID
-         n_target (int): number of targets stored in the object
-         filename (string): original filename from which the info was loaded
-         x (float): array of positions on the focal plane, in mm
-         y (float): array of positions on the focal plane, in mm
-         fiber_id (int): array of fiber_id to which the target is assigned
-    """
-    def __init__(self, filename):
-
-        hdulist = fits.open(filename)
-        self.filename = filename
-        self.ra = hdulist[1].data['RA']
-        self.dec = hdulist[1].data['DEC']
-        self.type = hdulist[1].data['OBJTYPE']
-        self.id = np.int_(hdulist[1].data['TARGETID'])
-        self.tile_ra = hdulist[1].header['TILE_RA']
-        self.tile_dec = hdulist[1].header['TILE_DEC']
-        self.tile_id = hdulist[1].header['TILE_ID']
-        self.n = np.size(self.ra)
-        self.x, self.y = radec2xy(self.ra, self.dec, self.tile_ra, self.tile_dec)
-
-        # this is related to the fiber assignment
-        self.fiber = -1.0 * np.ones(self.n, dtype='i4')
-
-        # This section is related to the number of times a galaxy has been observed,
-        # the assigned redshift and the assigned type
-        self.n_observed = np.zeros(self.n, dtype='i4')
-        self.assigned_z = -1.0 * np.ones(self.n)
-        self.assigned_type =  np.chararray(self.n, itemsize=8)
-        self.assigned_type[:] = 'NONE'
-
-    def set_fiber(self, target_id, fiber_id):
-        """
-        Sets the field .fiber[] (in the target_id  location) to fiber_uid
-        Args:
-            target_id (int): the target_id expected to be in self.id to modify
-                 its corresponding .fiber[] field
-            fiber_id (int): the fiber_id to be stored for the corresponding target_id
-        """
-        loc = np.where(self.id==target_id)
-        if(np.size(loc)!=0):
-            loc = loc[0]
-            self.fiber[loc]  = fiber_id
-        else:
-            raise ValueError('The fiber with %d ID does not seem to exist'%(fibers_id))
-
-    def reset_fiber(self, target_id):
-        """
-        Resets the field .fiber[] (in the target_id  location) to fiber_uid
-        Args:
-            target_id (int): the target_id expected to be in self.id to modify
-                 its corresponding .fiber[] field
-        """
-        loc = np.where(self.id==target_id)
-        if(np.size(loc)!=0):
-            loc = loc[0]
-            self.fiber[loc]  = -1
-        else:
-            raise ValueError('The fiber with %d ID does not seem to exist'%(fibers_id))
-
-
-    def reset_all_fibers(self):
-        """
-        Resets the field .fiber[] for all fibers.
-        """
-        self.fiber = -1.0 * np.ones(self.n, dtype='i4')
-
-
-    def write_results_to_file(self, targets_file):
-        """
-        Writes the section associated with the results to a fits file
-        Args:
-            targets_file (string): the name of the corresponding targets file
-        """
-
-        results_file = targets_file.replace("Targets_Tile", "Results_Tile")
-        if(os.path.isfile(results_file)):
-            os.remove(results_file)
-
-        c0=fits.Column(name='TARGETID', format='K', array=self.id)
-        c1=fits.Column(name='NOBS', format='I', array=self.n_observed)
-        c2=fits.Column(name='ASSIGNEDTYPE', format='8A', array=self.assigned_type)
-        c3=fits.Column(name='ASSIGNEDZ', format='D', array=self.assigned_z)
-
-        cat=fits.ColDefs([c0,c1,c2,c3])
-        table_targetcat_hdu=fits.TableHDU.from_columns(cat)
-
-        table_targetcat_hdu.header['TILE_ID'] = self.tile_id
-        table_targetcat_hdu.header['TILE_RA'] = self.tile_ra
-        table_targetcat_hdu.header['TILE_DEC'] = self.tile_dec
-
-        hdu=fits.PrimaryHDU()
-        hdulist=fits.HDUList([hdu])
-        hdulist.append(table_targetcat_hdu)
-        hdulist.verify()
-        hdulist.writeto(results_file)
-
-    def load_results(self, targets_file):
-        """
-        Loads results from the FITS file to update the arrays n_observed, assigned_z
-        and assigned_type.
-        Args:
-            tile_file (string): filename with the target information
-        """
-        results_file = targets_file.replace("Targets_Tile", "Results_Tile")
-        try:
-            fin = fits.open(results_file)
-            self.n_observed = fin[1].data['NOBS']
-            self.assigned_z = fin[1].data['ASSIGNEDZ']
-            self.assigned_type =  fin[1].data['ASSIGNEDTYPE']
-        except Exception as e:
-            import traceback
-            print('ERROR in get_tiles')
-            traceback.print_exc()
-            raise e
-
-    def update_results(self, fibers):
-        """
-        Updates the results of each target in the tile given the
-        corresponding association with fibers.
-
-        Args:
-            fibers (object class FocalPlaneFibers): only updates the results if a target
-                is assigned to a fiber.
-        Note:
-            Right now this procedure only opdates by one the number of observations.
-            It should also updated the redshift and the assigned type (given some additional information!)
-        """
-        for i in range(fibers.n_fiber):
-            t = fibers.target[i]
-            if(t != -1):
-                if((t in self.id)):
-                    index = np.where(t in self.id)
-                    index = index[0]
-                    self.n_observed[index]  =  self.n_observed[index] + 1
-                    # these two have to be updated as well TOWRITE
-                    # self.assigned_z[index]
-                    # self.assigned_type[index]
-                else:
-                    raise ValueError('The target associated with fiber_id %d does not exist'%(fibers.id[i]))
-
-
-
-
-class TargetSurvey(object):
-    """
-    Keeps basic information for all the targets in all tiles.
-    Attributes:
-        The properties initialized in the __init__ procedure are:
-        type (string): array describing the type of target.
-        id (int): 1D array of unique IDs.
-        n_observed (int)
-        assigned_type (string): array describing the assigned type
-        assigned_z (float): number of times this target has been observed
-        tile_names (string): list of list keeping track of all the tiles where this target is present.
-    """
-    def __init__(self, filename_list):
-        n_file = np.size(filename_list)
-        for i_file in np.arange(n_file):
-            print('Adding %s to build TargetSurvey %d files to go'%(filename_list[i_file], n_file - i_file))
-            tmp = TargetTile(filename_list[i_file])
-            # The first file is a simple initialization
-            if(i_file==0):
-                self.type = tmp.type.copy()
-                self.id = tmp.id.copy()
-                self.n_observed = tmp.n_observed.copy()
-                self.assigned_type = tmp.assigned_type.copy()
-                self.assigned_z = tmp.assigned_z.copy()
-                self.tile_names= []
-                for i in np.arange(np.size(self.id)):
-                    self.tile_names.append([filename_list[i_file]])
-            else: # the other files have to take into account the overlap
-                mask = np.in1d(self.id, tmp.id)
-
-                if((len(self.tile_names)!=np.size(self.id))):
-                    raise ValueError('Building TargetSurvey the numer of items in the filenames is not the same as in the ids.')
-                for i in np.arange(np.size(self.id)):
-                    if(mask[i]==True):
-                        self.tile_names[i].append(filename_list[i_file])
-
-                mask = np.in1d(tmp.id, self.id, invert=True)
-                n_new = np.size(np.where(mask==True))
-                self.id = np.append(self.id, tmp.id[mask])
-                self.type = np.append(self.type, tmp.type[mask])
-                self.n_observed = np.append(self.n_observed, tmp.n_observed[mask])
-                self.assigned_type = np.append(self.assigned_type, tmp.assigned_type[mask])
-                self.assigned_z = np.append(self.assigned_z, tmp.assigned_z[mask])
-                for i in np.arange(n_new):
-                    self.tile_names.append([filename_list[i_file]])
-
-        self.n_targets = np.size(self.id)

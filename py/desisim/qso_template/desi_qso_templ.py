@@ -1,5 +1,5 @@
 """
-#;+ 
+#;+
 #; NAME:
 #; fit_boss_qsos
 #;    Version 1.0
@@ -10,7 +10,7 @@
 #;-
 #;------------------------------------------------------------------------------
 """
-from __future__ import print_function, absolute_import, division, unicode_literals
+from __future__ import print_function, absolute_import, division
 
 import numpy as np
 import os
@@ -31,14 +31,12 @@ log = get_logger()
 #from xastropy.stats.basic import perc
 
 flg_xdb = True
-try: 
+try:
     from xastropy.xutils import xdebug as xdb
 except ImportError:
     flg_xdb = False
 
-desisim_path = imp.find_module('desisim')[1]+'/../../'
 
-##
 def mean_templ_zi(zimag, debug=False, i_wind=0.1, z_wind=0.05,
                   boss_pca_fil=None):
     '''
@@ -73,7 +71,7 @@ def mean_templ_zi(zimag, debug=False, i_wind=0.1, z_wind=0.05,
 
     # Output array
     ntempl = len(zimag)
-    out_spec = np.zeros( (ntempl, npix) ) 
+    out_spec = np.zeros( (ntempl, npix) )
 
     # Iterate on z,imag
     for izi in zimag:
@@ -126,9 +124,9 @@ def fig_desi_templ_z_i(outfil=None, boss_fil=None, flg=0):
                [ (2.5, 18.5), (2.5, 19.5), (2.5, 20.5), (2.5, 21.5) ],
                [ (2.7, 19.5), (2.7, 20.5), (2.7, 21.5) ],
                [ (3.2, 19.5), (3.2, 20.5), (3.2, 21.5) ] ]
-               
+
     xmnx = (3600., 9000.)
-                
+
     # Start the plot
     if outfil != None:
         pp = PdfPages(outfil)
@@ -151,7 +149,7 @@ def fig_desi_templ_z_i(outfil=None, boss_fil=None, flg=0):
         # Labels
         if ii == 3:
             ax.set_xlabel('Wavelength')
-        else: 
+        else:
             ax.get_xaxis().set_ticks([])
         ax.set_ylabel('Flux')
 
@@ -175,14 +173,14 @@ def fig_desi_templ_z_i(outfil=None, boss_fil=None, flg=0):
     if outfil != None:
         pp.savefig(bbox_inches='tight')
         pp.close()
-    else: 
+    else:
         plt.show()
 
 
 def desi_qso_templates(z_wind=0.2, zmnx=(0.4,4.), outfil=None, N_perz=500,
                        boss_pca_fil=None, wvmnx=(3500., 10000.),
                        rebin_wave=None, rstate=None,
-                       sdss_pca_fil=None, no_write=False,
+                       sdss_pca_fil=None, no_write=False, redshift=None,
                        seed=None, old_read=False, ipad=20):
     """ Generate QSO templates for DESI
 
@@ -204,7 +202,7 @@ def desi_qso_templates(z_wind=0.2, zmnx=(0.4,4.), outfil=None, N_perz=500,
       Input wavelengths for rebinning
     wvmnx : tuple, optional
       Wavelength limits for rebinning (not used with rebin_wave)
-    redshifts : ndarray, optional
+    redshift : ndarray, optional
       Redshifts desired for the templates
     ipad : int, optional
       Padding for enabling enough models
@@ -218,7 +216,8 @@ def desi_qso_templates(z_wind=0.2, zmnx=(0.4,4.), outfil=None, N_perz=500,
       Redshifts
     """
     # Cosmology
-    from astropy import cosmology 
+    from astropy import cosmology
+    from desispec.interpolation import resample_flux
     cosmo = cosmology.core.FlatLambdaCDM(70., 0.3)
 
     if old_read:
@@ -250,10 +249,9 @@ def desi_qso_templates(z_wind=0.2, zmnx=(0.4,4.), outfil=None, N_perz=500,
         # Eigenvectors
         eigen, eigen_wave = fbq.read_qso_eigen()
     else:
-        # hdus = fits.open(desisim_path+'/data/qso_templates_v2.0.fits')
         infile = desisim.io.find_basis_template('qso')
         hdus = fits.open(infile)
-        
+
         hdu_names = [hdus[ii].name for ii in range(len(hdus))]
         boss_pca_coeff = hdus[hdu_names.index('BOSS_PCA')].data
         sdss_pca_coeff = hdus[hdu_names.index('SDSS_PCA')].data
@@ -268,9 +266,13 @@ def desi_qso_templates(z_wind=0.2, zmnx=(0.4,4.), outfil=None, N_perz=500,
     lambda_912 = 911.76
     pix912 = np.argmin( np.abs(eigen_wave-lambda_912) )
 
-    # Loop on redshift
-    z0 = np.arange(zmnx[0],zmnx[1],z_wind)
-    z1 = z0 + z_wind
+    # Loop on redshift.  If the
+    if redshift is None:
+        z0 = np.arange(zmnx[0],zmnx[1],z_wind)
+        z1 = z0 + z_wind
+    else:
+        z0 = np.array([redshift])
+        z1 = z0
 
     pca_list = ['PCA0', 'PCA1', 'PCA2', 'PCA3']
     PCA_mean = np.zeros(4)
@@ -288,7 +290,7 @@ def desi_qso_templates(z_wind=0.2, zmnx=(0.4,4.), outfil=None, N_perz=500,
     for ii in range(len(z0)):
 
         # BOSS or SDSS?
-        if z0[ii] > 1.99:
+        if z0[ii] > 2.15:
             zQSO = boss_zQSO
             pca_coeff = boss_pca_coeff
         else:
@@ -303,7 +305,15 @@ def desi_qso_templates(z_wind=0.2, zmnx=(0.4,4.), outfil=None, N_perz=500,
         mfp = 37. * ( (1+zrand)/5. )**(-5.4) # Physical Mpc
 
         # Grab PCA mean + sigma
-        idx = np.where( (zQSO >= z0[ii]) & (zQSO < z1[ii]) )[0]
+        if redshift is None:
+            idx = np.where( (zQSO >= z0[ii]) & (zQSO < z1[ii]) )[0]
+        else:
+            # Hack by @moustakas: add a little jitter to get the set of QSOs
+            # that are *nearest* in redshift to the desired output redshift.
+            idx = np.where( (zQSO >= z0[ii]-0.01) & (zQSO < z1[ii]+0.01) )[0]
+            if len(idx) == 0:
+                idx = np.array([(np.abs(zQSO-zrand[0])).argmin()])
+                #pdb.set_trace()
         log.debug('Making z=({:g},{:g}) with {:d} input quasars'.format(z0[ii],z1[ii],len(idx)))
 
         # Get PCA stats and random values
@@ -367,12 +377,13 @@ def desi_qso_templates(z_wind=0.2, zmnx=(0.4,4.), outfil=None, N_perz=500,
 
     totN = N_perz * len(z0)
     rebin_spec = np.zeros((r_npix, totN))
-    
+
 
     for ii in range(totN):
         # Interpolate (in log space)
-        f1d = interp1d(np.log10(final_wave[:,ii]), final_spec[:,ii])
-        rebin_spec[:,ii] = f1d(log_wave)
+        rebin_spec[:, ii] = resample_flux(log_wave, np.log10(final_wave[:, ii]), final_spec[:, ii])
+        #f1d = interp1d(np.log10(final_wave[:,ii]), final_spec[:,ii])
+        #rebin_spec[:,ii] = f1d(log_wave)
 
     if outfil is None:
         return 10.**log_wave, rebin_spec, final_z
@@ -395,7 +406,7 @@ def desi_qso_templates(z_wind=0.2, zmnx=(0.4,4.), outfil=None, N_perz=500,
     hdu.header.set('WAVEUNIT', 'Angstrom', ' wavelength units')
     hdu.header.set('BUNIT', '1e-17 erg/s/cm2/A', ' flux unit')
 
-    idval = range(totN)
+    idval = list(range(totN))
     col0 = fits.Column(name=str('TEMPLATEID'),format=str('J'), array=idval)
     col1 = fits.Column(name=str('Z'),format=str('E'),array=final_z)
     cols = fits.ColDefs([col0, col1])
@@ -430,7 +441,7 @@ def chk_desi_qso_templates(infil=None, outfil=None, N_perz=100):
 
     # Eigen (for wavelengths)
     xmnx = (3600., 10000.)
-                
+
     # Start the plot
     if outfil != None:
         pp = PdfPages(outfil)
@@ -473,7 +484,7 @@ def chk_desi_qso_templates(infil=None, outfil=None, N_perz=100):
         if outfil != None:
             pp.savefig()#bbox_inches='tight')
             plt.close()
-        else: 
+        else:
             plt.show()
 
     pp.close()
@@ -542,14 +553,14 @@ def tst_random_set():
             outfil='test_random_set.fits', N_perz=100, seed=12345)
 
 
-## #################################    
-## #################################    
+## #################################
+## #################################
 ## TESTING
-## #################################    
+## #################################
 if __name__ == '__main__':
 
     # Run
-    flg_test = 0 
+    flg_test = 0
     #flg_test += 1  # Mean templates with z,imag
     #flg_test += 2  # Mean template fig
     #flg_test += 2**2  # v1.1 templates

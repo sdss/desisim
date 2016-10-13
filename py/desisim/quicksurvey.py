@@ -54,32 +54,32 @@ class SimSetup(object):
             n_epochs (int): number of epochs to be simulated.
 
         """
-        if 'output_path' in kwargs.keys() :
+        if 'output_path' in kwargs:
             self.output_path = kwargs['output_path']        
         else:
             raise NameError('output_path was not set')
 
-        if 'targets_path' in kwargs.keys() :
+        if 'targets_path' in kwargs:
             self.targets_path = kwargs['targets_path']        
         else:
             raise NameError('targets_path was not set')
 
-        if 'epochs_path' in kwargs.keys() :
+        if 'epochs_path' in kwargs:
             self.epochs_path = kwargs['epochs_path']        
         else:
             raise NameError('epochs_path was not set')
 
-        if 'fiberassign_exec' in kwargs.keys() :
+        if 'fiberassign_exec' in kwargs:
             self.fiberassign_exec = kwargs['fiberassign_exec']        
         else:
             raise NameError('fiberassign was not set')
 
-        if 'template_fiberassign' in kwargs.keys() :
+        if 'template_fiberassign' in kwargs:
             self.template_fiberassign = kwargs['template_fiberassign']        
         else:
             raise NameError('template_fiberassign was not set')
 
-        if 'n_epochs' in kwargs.keys() :
+        if 'n_epochs' in kwargs:
             self.n_epochs = kwargs['n_epochs']
         else:
             raise NameError('n_epochs was not set')
@@ -96,7 +96,7 @@ class SimSetup(object):
         self.tilefiles = []
         self.mtl_epochs = []
         self.fiber_epochs = []
-        self.epochs_list = range(self.n_epochs)
+        self.epochs_list = list(range(self.n_epochs))
 
     def reset_lists(self):
         """Resets counters
@@ -274,6 +274,7 @@ class SimSetup(object):
             
         # launch fiberassign
         print("{} Launching fiberassign".format(asctime()))
+
         #know mtl by now
         elg=((mtl['DESI_TARGET'] & desi_mask.ELG) != 0)
         more=(mtl['NUMOBS_MORE']>0)
@@ -288,6 +289,7 @@ class SimSetup(object):
             print("stderr:",line.rstrip())
         print("{} Finished fiberassign".format(asctime()))
         
+
 
         #create a list of fibermap tiles to read and update zcat
         # find first the set of tiles corresponding to this epoch
@@ -381,7 +383,7 @@ def print_efficiency_stats(truth, mtl_initial, zcat):
     
     for true_type, zcat_type in zip(true_types, zcat_types):
         i_initial = ((tmp_init['DESI_TARGET'] & desi_mask.mask(true_type)) != 0) & (tmp_init['TRUETYPE'] == zcat_type)
-        i_final = ((total['DESI_TARGET'] & desi_mask.mask(true_type)) != 0) & (total['TYPE'] == zcat_type)             
+        i_final = ((total['DESI_TARGET'] & desi_mask.mask(true_type)) != 0) & (total['SPECTYPE'] == zcat_type)             
         n_t = 1.0*len(total['TARGETID'][i_final])
         n_i = 1.0*len(tmp_init['TARGETID'][i_initial])
         print("\t {} fraction : {}".format(true_type, n_t/n_i))
@@ -402,8 +404,8 @@ def print_numobs_stats(truth, targets, zcat):
         ii = (xcat['NUMOBS']==times_observed)
         c = Counter(xcat['DESI_TARGET'][ii])
 
-        total = np.sum(c.values())
-        for k in c.keys():
+        total = np.sum(list(c.values()))
+        for k in c:
             print("\t\t {}: {} ({} total)".format(desi_mask.names(k), c[k]/total, c[k]))
     return
 
