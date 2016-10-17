@@ -17,7 +17,7 @@ from collections import Counter
 import numpy as np
 from astropy.io import fits
 from astropy.table import Table, Column
-from desispec.log import get_logger
+#from desispec.log import get_logger
 import sys
 from operator import itemgetter, attrgetter, methodcaller
 
@@ -99,7 +99,7 @@ def new_get_observed_redshifts(truetype, truez):
     TODO: Add BGS, MWS support     
     """
     print('new version')
-    log=get_logger()
+    #log=get_logger()
     zout = truez.copy()
     zerr = np.zeros(len(truez), dtype=np.float32)
     zwarn = np.zeros(len(truez), dtype=np.int32)
@@ -112,7 +112,7 @@ def new_get_observed_redshifts(truetype, truez):
     try :
         zb_hdulist=fits.open(file)
     except :
-        log.error("can not open file %s:"%file)
+        #log.error("can not open file %s:"%file)
         zb_hdulist.close()
         sys.exit(12)
 
@@ -160,7 +160,7 @@ def very_new_get_observed_redshifts(truetype, truez):
     TODO: Add BGS, MWS support     
     """
     print('very new version')
-    log=get_logger()
+    #log=get_logger()
     zout = truez.copy()
     zerr = np.zeros(len(truez), dtype=np.float32)
     zwarn = np.zeros(len(truez), dtype=np.int32)
@@ -169,11 +169,12 @@ def very_new_get_observed_redshifts(truetype, truez):
 
     desi_root = os.getenv('DESI_ROOT', '/project/projectdirs/desi')
     quickcat_z_lookup = desi_root+'/'+'spectro/quickcat/'
-    file = os.path.join(quickcat_z_lookup,'sorted_elgs.fits')
+    #file = os.path.join(quickcat_z_lookup,'sorted_elgs.fits')
+    file = os.path.join(quickcat_z_lookup,'sorted_elgs_oak1.fits')
     try :
         zb_hdulist=fits.open(file)
     except :
-        log.error("can not open file %s:"%file)
+        #log.error("can not open file %s:"%file)
         zb_hdulist.close()
         sys.exit(12)
 
@@ -198,7 +199,7 @@ def very_new_get_observed_redshifts(truetype, truez):
     for i in range(number_bins):
         B.append(template)
     
-        while(template<number_templates and zarray[template+1]<x+bin_delta):
+        while(template<number_templates-1 and zarray[template+1]<x+bin_delta):
             template=template+1
             B.append(template)
  
@@ -306,7 +307,7 @@ def quickcat(tilefiles, targets, truth, zcat=None, perfect=False,newversion=True
     #- Copy TRUEZ -> Z so that we can add errors without altering original
     newzcat['Z'] = truth['TRUEZ'].copy()
 
-    newzcat['TYPE'] = truth['TRUETYPE'].copy()
+    newzcat['SPECTYPE'] = truth['TRUETYPE'].copy()
     # rnc add RA and DEC
     newzcat['RA'] = truth['RA'].copy()
     newzcat['DEC'] = truth['DEC'].copy() 
