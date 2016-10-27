@@ -33,106 +33,100 @@ def very_new_get_observed_redshifts(truetype, truez):
     Returns observed z, zerr, zwarn arrays given true object types and redshifts
     
     Args:
-        truetype : array of ELG, LRG, QSO, STAR, SKY, or UNKNOWN
+        truetype : array of ["ELG","LRG","QSO","STD","SKY","BGS","MWS_STAR"]
         truez: array of true redshifts
         
-    Returns tuple of (zout, zerr, zwarn)
-
-    TODO: Add BGS, MWS support     
+    Returns tuple of (zout, zerr, zwarn) for each category: elg, etc.
     """
-    print('very new version')
-    #zout defaults to truez if not changee.  for now only change ELGs
-    zout = truez.copy()
+    hdulist=fits.open('/project/projectdirs/desi/spectro/quickcat/z_lookuptab_oak1.fits')
+    hdud=hdulist[1].data
+    target_types=["ELG","LRG","QSO","STD","SKY","BGS","MWS_STAR"]
+    tlist=[]
+    zout =  np.zeros(len(truez), dtype=np.int32)
     zerr = np.zeros(len(truez), dtype=np.float32)
     zwarn = np.zeros(len(truez), dtype=np.int32)
+    for i in range(len(target_types)):
+        x=(hdud['TROBJTYPE']==target_types[i])
+        tlist.append(hdud[x])
+        print(" %d  targets of type %s "%(len(tlist[i]),target_types[i]))
+    
 
-    #- reads lookup table from $DESI_ROOT/spectro/quickcat/sorted_true_elgs.fits
+    for t_type in range(len(target_types)):
+ 
+        newzb=tlist[t_type]
+        #true z values for galaxies run through redmonster for this t_type
+        truezarray=newzb['ZBTRUEZ']
+        number_templates=len(truezarray)
+        #bin size in z
+        #set mean templates per bin
+        mean=10.
+        bin_delta=mean/number_templates
+        zmin=np.amin(truezarray)
+        zmax=np.amax(truezarray)
+        number_bins=int((zmax-zmin)/bin_delta)+1
+        print(" number of bins %d  bin_delta %f "%(number_bins,bin_delta))
 
-    desi_root = os.getenv('DESI_ROOT', '/project/projectdirs/desi')
-    quickcat_z_lookup = desi_root+'/'+'spectro/quickcat/'
-    #file = os.path.join(quickcat_z_lookup,'sorted_elgs.fits')
-    file = os.path.join(quickcat_z_lookup,'sorted_elgs_oak1.fits')
-    try :
-        zb_hdulist=fits.open(file)
-    except :
-        zb_hdulist.close()
-        sys.exit(12)
-
-    newzb=zb_hdulist[1].data
-    #true z values for galaxies run through redmonster
-    zarray=newzb['ZBTRUEZ']
-    number_templates=len(zarray)
-    #pick out the ELGs
-    ii=(newzb['ZBTYPE']=='ssp_em_galaxy')
-    #true z values for ELGs
-    truezarray=newzb[ii]['ZBTRUEZ']
-
-    #bin size in z
-    #set mean templates per bin
-    mean=10.
-    bin_delta=mean/number_templates
-    zmin=np.amin(truezarray)
-    zmax=np.amax(truezarray)
-    number_bins=int((zmax-zmin)/bin_delta)+1
-
-#   put lookup table lines into bins
-    print(" min %f max %f "%(zmin,zmax))
-    A=[]
-    x=zmin
-    B=[]
-    template=0
-    for i in range(number_bins):
-        #first template not included previously goes into the next collection
-        #it is possible that a template might be the only one in a collection 
-        #several times
-        B.append(template)
-        #B is collection of templates belonging in this bin
-        while(template<number_templates-1 and zarray[template+1]<x+bin_delta):
-            template=template+1
-            B.append(template)
-        #add this collection of templates to A, 
-        #which is the list of collections of templates    
-        A.append(B)
-        x=x+bin_delta
+        #   put lookup table lines into bins for this t_type
+        print(" min %f max %f "%(zmin,zmax))
+        A=[]
+        x=zmin
         B=[]
-    #default to input z unless type is ELG
-    ii, = np.where(truetype == 'ELG')
-    for i in ii:
-        zin=truez[i]
-        if(zin>zmax or zin<zmin):
-            #print('bad z  %f'%zin)
-            
-            zout[i]=0.
-            zerr[i]=0.
-            zwarn[i]=4
-        else:    
-            #find the right bin for input z
-            bin_find=int(  (zin-zmin  )/bin_delta)  
-            if(bin_find>number_bins):
-                print('z %f bin_find %d'%(z,bin_find))
+        template=0
+        for i in range(number_bins):
+            #first template not included previously goes into the next collection
+            #it is possible that a template might be the only one in a collection 
+            #several times
+            B.append(template)
+           #B is collection of templates belonging in this bin
+            while(template<number_templates-1 and truezarray[template+1]<x+bin_delta):
+                template=template+1
+                B.append(template)
+            #add this collection of templates to A, 
+            #which is the list of collections of templates    
+            A.append(B)
+            x=x+bin_delta
+            B=[]
+        print("no of bins %d"%len(A))    
+        ii, = np.where(truetype == target_types[t_type])
+        
+        for i in ii:
+            zin=truez[i]
+
+            if ((zin>zmax) or (zin<zmin)):
+                #print('bad z  %f'%zin)
                 zout[i]=0.
                 zerr[i]=0.
                 zwarn[i]=4
-            else:
-                #use collection of templates in this bin
-                choices=A[bin_find]
-                right_choice=choices[0]
-                if len(choices)!=1:
-                    for j in range(len(choices)):
-                        #take first template whose true z is less than input z
-                        #if all template-z's are greater than input take choices[0]
-                        if zin>zarray[choices[j]]:
-                            right_choice=choices[j]
-                        else:
-                            break
+ 
+            else:    
+                #find the right bin for input z
+                bin_find=int(  (zin-zmin  )/bin_delta)  
+                if(bin_find>number_bins):
+                    print('z %f bin_find %d'%(z,bin_find))
+                    zout[i]=0.
+                    zerr[i]=0.
+                    zwarn[i]=4
+                else:
+                    #use collection of templates in this bin
+                    choices=A[bin_find]
+                    right_choice=choices[0]
+                    if len(choices)!=1:
+                        for j in range(len(choices)):
+                            #take first template whose true z is less than input z
+                            #if all template-z's are greater than input take choices[0]
+                            if zin>truezarray[choices[j]]:
+                                right_choice=choices[j]
+                            else:
+                                break
 
 
-                zout[i] = truez[i]+(newzb['ZBFITZ'][right_choice]-newzb['ZBTRUEZ'][right_choice])
-                zerr[i] =  newzb['ZBZERR'][right_choice]
-                zwarn[i] = newzb['ZBZWARN'][right_choice]
+                    zout[i] = truez[i]+(newzb['ZBFITZ'][right_choice]-newzb['ZBTRUEZ'][right_choice])
+                    zerr[i] =  newzb['ZBZERR'][right_choice]
+                    zwarn[i] = newzb['ZBZWARN'][right_choice]
 
         
     return zout, zerr, zwarn    
+
 
 def quickcat(tilefiles, targets, truth, zcat=None, perfect=False,newversion=True):
     """
