@@ -42,7 +42,7 @@ def very_new_get_observed_redshifts(truetype, truez):
     hdud=hdulist[1].data
     target_types=["ELG","LRG","QSO","STD","SKY","BGS","MWS_STAR"]
     tlist=[]
-    zout =  np.zeros(len(truez), dtype=np.int32)
+    zout =  np.zeros(len(truez), dtype=np.float32)
     zerr = np.zeros(len(truez), dtype=np.float32)
     zwarn = np.zeros(len(truez), dtype=np.int32)
     for i in range(len(target_types)):
