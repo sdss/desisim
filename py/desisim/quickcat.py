@@ -48,7 +48,7 @@ def very_new_get_observed_redshifts(truetype, truez):
     for i in range(len(target_types)):
         x=(hdud['TROBJTYPE']==target_types[i])
         tlist.append(hdud[x])
-        print(" %d  targets of type %s "%(len(tlist[i]),target_types[i]))
+        print(" %d  templates of type %s "%(len(tlist[i]),target_types[i]))
     
 
     for t_type in range(len(target_types)):
@@ -64,7 +64,7 @@ def very_new_get_observed_redshifts(truetype, truez):
         zmin=np.amin(truezarray)
         zmax=np.amax(truezarray)
         number_bins=int((zmax-zmin)/bin_delta)+1
-        print(" number of bins %d  bin_delta %f "%(number_bins,bin_delta))
+        print("%s : number of bins %d  bin_delta %f "%(target_types[t_type],number_bins,bin_delta))
 
         #   put lookup table lines into bins for this t_type
         print(" min %f max %f "%(zmin,zmax))
@@ -86,7 +86,7 @@ def very_new_get_observed_redshifts(truetype, truez):
             A.append(B)
             x=x+bin_delta
             B=[]
-        print("no of bins %d"%len(A))    
+        print(" no of bins %d"%len(A))    
         ii, = np.where(truetype == target_types[t_type])
         
         for i in ii:
@@ -205,8 +205,9 @@ def quickcat(tilefiles, targets, truth, zcat=None, perfect=False,newversion=True
 
     #- Add ZERR and ZWARN
     ### print('Adding ZERR and ZWARN')
-    print ("perfect z? %s "%perfect)
+
     if not perfect:
+        print("zcat using templates from redmonster")
         #- GALAXY -> ELG or LRG
         objtype = newzcat['SPECTYPE'].copy()
         isLRG = (objtype == 'GALAXY') & ((targets['DESI_TARGET'] & desi_mask.LRG) != 0)
