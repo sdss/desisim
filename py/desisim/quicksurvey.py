@@ -280,14 +280,14 @@ class SimSetup(object):
         more=(mtl['NUMOBS_MORE']>0)
         print ("ELGs in mtl needing observation %d"%len(mtl[elg & more]))
         p = subprocess.Popen([self.fiberassign_exec, os.path.join(self.tmp_output_path, 'fa_features.txt')], stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-        '''
+        
         for line in p.stdout:
 
             print("stdout:",line.rstrip())
         
         for line in p.stderr:
             print("stderr:",line.rstrip())
-        '''
+        
         print("{} Finished fiberassign".format(asctime()))
         
 
