@@ -280,13 +280,14 @@ class SimSetup(object):
         more=(mtl['NUMOBS_MORE']>0)
         print ("ELGs in mtl needing observation %d"%len(mtl[elg & more]))
         p = subprocess.Popen([self.fiberassign_exec, os.path.join(self.tmp_output_path, 'fa_features.txt')], stdout=subprocess.PIPE,stderr=subprocess.PIPE)
-        
+        '''
         for line in p.stdout:
 
             print("stdout:",line.rstrip())
         
         for line in p.stderr:
             print("stderr:",line.rstrip())
+        '''
         print("{} Finished fiberassign".format(asctime()))
         
 
@@ -333,28 +334,12 @@ class SimSetup(object):
         truth=targets=mtl=zcat=None
         for epoch in self.epochs_list:
             print('Epoch number {}'.format(epoch))
-            #try to flush stdout
-            sys.stdout.flush()
-
-
             self.set_mtl_epochs(epochs_list = self.epochs_list[epoch:])
-            #rnc
-            print("mtl epochs {}".format(self.mtl_epochs))
-            sys.stdout.flush()
             self.set_fiber_epochs(epochs_list = self.epochs_list[epoch])
-        
-            print("fiber epochs {}".format(self.fiber_epochs))
-            sys.stdout.flush()    
             self.create_surveyfile()
-            print("between creates")
-            sys.stdout.flush()   
             self.create_fiberassign_input()
-            print("before simulate")
-            sys.stdout.flush() 
             truth, targets, mtl, zcat = self.simulate_epoch(perfect=False, epoch_id = self.epochs_list[epoch], 
                                                             truth=truth, targets=targets, mtl=mtl, zcat=zcat)
-            #try to flush stdout
-            sys.stdout.flush()
 
             #get summary
             #summary_setup(self)
