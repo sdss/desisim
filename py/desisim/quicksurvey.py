@@ -346,13 +346,13 @@ class SimSetup(object):
                                                             truth=truth, targets=targets, mtl=mtl, zcat=zcat)
 
             #get summary
-            summary_setup(self)
+
 
             self.backup_epoch_data(epoch_id = self.epochs_list[epoch])
 
             self.reset_lists()
             
-            
+        summary_setup(self)           
 
         #self.cleanup_directories()
 
