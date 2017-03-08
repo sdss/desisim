@@ -140,7 +140,7 @@ def parse(options=None):
     parser.add_argument('--objtype', type=str,  help='ELG, LRG, QSO, BGS, MWS, WD, DARK_MIX, or BRIGHT_MIX', default='DARK_MIX', metavar='')
     parser.add_argument('-a','--airmass', type=float,  help='airmass', default=1.25, metavar='') # Science Req. Doc L3.3.2
     parser.add_argument('-e','--exptime', type=float,  help='exposure time (s)', default=None,metavar='')
-    parser.add_argument('-o','--outdir', type=str,  help='output directory', default='.', metavar='')
+    parser.add_argument('-o','--outdir', type=str,  help='output directory', default=None, metavar='')
     parser.add_argument('-v','--verbose', action='store_true', help='toggle on verbose output')
     parser.add_argument('--outdir-truth', type=str,  help='optional alternative output directory for truth files', metavar='')
 
@@ -174,8 +174,8 @@ def parse(options=None):
         hdr = fits.getheader(args.simspec)
         night = str(hdr['NIGHT'])
         expid = int(hdr['EXPID'])
-        args.simspec = desisim.io.findfile('simspec', night, expid)
-        args.fibermap = desispec.io.findfile('fibermap', night, expid)
+        args.simspec = desisim.io.findfile('simspec', night, expid, outdir=args.outdir)
+        args.fibermap = desispec.io.findfile('fibermap', night, expid, outdir=args.outdir)
 
     if args.simspec is None and args.brickname is None:
         msg = 'Must have simspec and fibermap files or provide brick name'
@@ -519,7 +519,7 @@ def main(args):
 
                 for kk in range((args.nspec+args.nstart-1)//500+1):
                     camera = channel+str(kk)
-                    outfile = desispec.io.findfile('fiberflat', NIGHT, EXPID, camera)
+                    outfile = desispec.io.findfile('fiberflat', NIGHT, EXPID, camera, outdir=args.outdir)
                     start=max(500*kk,args.nstart)
                     end=min(500*(kk+1),nmax)
 
@@ -531,7 +531,7 @@ def main(args):
                         ivar[start:end,:], mask[start:end,:], meanspec,
                         header=dict(CAMERA=camera))
                     write_fiberflat(outfile, ff)
-                    filePath=desispec.io.findfile("fiberflat",NIGHT,EXPID,camera)
+                    filePath=desispec.io.findfile("fiberflat",NIGHT,EXPID,camera, outdir=args.outdir)
                     log.info("Wrote file {}".format(filePath))
 
             sys.exit(0)
@@ -627,8 +627,10 @@ def main(args):
 
         # Output brick files
         if args.brickname:
+            if args.outdir is None:
+                outdir = '.'
             filename = 'brick-{}-{}.fits'.format(channel, args.brickname)
-            filepath = os.path.join(args.outdir, filename)
+            filepath = os.path.join(outdir, filename)
             if os.path.exists(filepath):
                 os.remove(filepath)
             log.debug('Writing {}'.format(filepath))
@@ -669,7 +671,7 @@ def main(args):
                     num_pixels = len(waves[channel])
     
                     # Write frame file
-                    framefileName=desispec.io.findfile("frame",NIGHT,EXPID,camera)
+                    framefileName=desispec.io.findfile("frame",NIGHT,EXPID,camera, outdir=args.outdir)
     
                     frame_flux=nobj[start:end,armName[channel],:num_pixels]+ \
                     nsky[start:end,armName[channel],:num_pixels] + \
@@ -690,14 +692,14 @@ def main(args):
                         fibermap=fibermap[start:end], meta=dict(CAMERA=camera) )
                     desispec.io.write_frame(framefileName, frame)
     
-                    framefilePath=desispec.io.findfile("frame",NIGHT,EXPID,camera)
+                    framefilePath=desispec.io.findfile("frame",NIGHT,EXPID,camera, outdir=args.outdir)
                     log.info("Wrote file {}".format(framefilePath))
     
                     if args.frameonly or simspec.flavor == 'arc':
                         continue
     
                     # Write cframe file
-                    cframeFileName=desispec.io.findfile("cframe",NIGHT,EXPID,camera)
+                    cframeFileName=desispec.io.findfile("cframe",NIGHT,EXPID,camera, outdir=args.outdir)
                     cframeFlux=cframe_observedflux[start:end,armName[channel],:num_pixels]+cframe_rand_noise[start:end,armName[channel],:num_pixels]
                     cframeIvar=cframe_ivar[start:end,armName[channel],:num_pixels]
 
@@ -707,11 +709,11 @@ def main(args):
                         fibermap=fibermap[start:end], meta=dict(CAMERA=camera) )
                     desispec.io.frame.write_frame(cframeFileName,cframe)
     
-                    cframefilePath=desispec.io.findfile("cframe",NIGHT,EXPID,camera)
+                    cframefilePath=desispec.io.findfile("cframe",NIGHT,EXPID,camera, outdir=args.outdir)
                     log.info("Wrote file {}".format(cframefilePath))
     
                     # Write sky file
-                    skyfileName=desispec.io.findfile("sky",NIGHT,EXPID,camera)
+                    skyfileName=desispec.io.findfile("sky",NIGHT,EXPID,camera, outdir=args.outdir)
                     skyflux=nsky[start:end,armName[channel],:num_pixels] + \
                     sky_rand_noise[start:end,armName[channel],:num_pixels]
                     skyivar=sky_ivar[start:end,armName[channel],:num_pixels]
@@ -722,11 +724,11 @@ def main(args):
                         header=dict(CAMERA=camera))
                     desispec.io.sky.write_sky(skyfileName, skymodel)
     
-                    skyfilePath=desispec.io.findfile("sky",NIGHT,EXPID,camera)
+                    skyfilePath=desispec.io.findfile("sky",NIGHT,EXPID,camera, outdir=args.outdir)
                     log.info("Wrote file {}".format(skyfilePath))
     
                     # Write calib file
-                    calibVectorFile=desispec.io.findfile("calib",NIGHT,EXPID,camera)
+                    calibVectorFile=desispec.io.findfile("calib",NIGHT,EXPID,camera, outdir=args.outdir)
                     flux = cframe_observedflux[start:end,armName[channel],:num_pixels]
                     phot = nobj[start:end,armName[channel],:num_pixels]
                     calibration = np.zeros_like(phot)
@@ -743,7 +745,5 @@ def main(args):
                     fluxcalib = FluxCalib(waves[channel], calibration, calibivar, mask)
                     write_flux_calibration(calibVectorFile, fluxcalib)
     
-                    calibfilePath=desispec.io.findfile("calib",NIGHT,EXPID,camera)
+                    calibfilePath=desispec.io.findfile("calib",NIGHT,EXPID,camera, outdir=args.outdir)
                     log.info("Wrote file {}".format(calibfilePath))
-
-
