@@ -567,7 +567,7 @@ def _qso_format_version(filename):
             raise IOError('Unknown QSO basis template format '+filename)
 
 def read_basis_templates(objtype, subtype='', outwave=None, nspec=None,
-                         infile=None, onlymeta=False):
+                         infile=None, onlymeta=False, onlykcorr=False):
     """Return the basis (continuum) templates for a given object type.  Optionally
     returns a randomly selected subset of nspec spectra sampled at
     wavelengths outwave.
@@ -610,7 +610,7 @@ def read_basis_templates(objtype, subtype='', outwave=None, nspec=None,
         infile = find_basis_template(ltype)
 
     if onlymeta:
-        log.info('Reading {} metadata.'.format(infile))
+        log.debug('Reading {} metadata.'.format(infile))
         meta = Table(fits.getdata(infile, 1))
 
         if (objtype.upper() == 'WD') and (subtype != ''):
@@ -622,8 +622,16 @@ def read_basis_templates(objtype, subtype='', outwave=None, nspec=None,
 
         return meta
 
-    log.info('Reading {}'.format(infile))
+    if onlykcorr:
+        try:
+            kcorr = Table(fits.getdata(infile, extname='KCORRECT'))
+            log.debug('Reading {} K-corrections.'.format(infile))
+            return kcorr
+        except:
+            log.warning('No K-corrections found in {}.'.format(infile))
+            return 0
 
+    log.debug('Reading {}'.format(infile))
     if objtype.upper() == 'QSO':
         with fits.open(infile) as fx:
             format_version = _qso_format_version(infile)
