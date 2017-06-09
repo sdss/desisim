@@ -761,7 +761,7 @@ class ELG(GALAXY):
 
     def __init__(self, minwave=3600.0, maxwave=10000.0, cdelt=0.2, wave=None,
                  add_SNeIa=False, normfilter='decam2014-r', colorcuts_function=None,
-                 baseflux=None, basewave=None, basemeta=None):
+                 baseflux=None, basewave=None, basemeta=None, nocolorcuts=False):
         """Initialize the ELG class.  See the GALAXY.__init__ method for documentation
          on the arguments plus the inherited attributes.
 
@@ -779,7 +779,7 @@ class ELG(GALAXY):
         Raises:
 
         """
-        if colorcuts_function is None:
+        if (colorcuts_function is None) and (not nocolorcuts):
             from desitarget.cuts import isELG as colorcuts_function
 
         super(ELG, self).__init__(objtype='ELG', minwave=minwave, maxwave=maxwave,
