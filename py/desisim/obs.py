@@ -51,7 +51,8 @@ def testslit_fibermap() :
 
 def new_exposure(flavor, nspec=5000, night=None, expid=None, tileid=None,
                  airmass=1.0, exptime=None, seed=None, testslit=False,
-                 arc_lines_filename=None, flat_spectrum_filename=None):
+                 arc_lines_filename=None, flat_spectrum_filename=None,
+                 target_densities = {}):
 
     """
     Create a new exposure and output input simulation files.
@@ -71,6 +72,7 @@ def new_exposure(flavor, nspec=5000, night=None, expid=None, tileid=None,
         testslit : simulate test slit if True, default False
         arc_lines_filename : use alternate arc lines filename (used if flavor="arc")
         flat_spectrum_filename : use alternate flat spectrum filename (used if flavor="flat")
+        target_densities : dictionary defining the density of targets, sky fibers, etc to be used when sampling. If the dictionary is given, this replaces the loading of the target yaml file (os.environ['DESIMODEL'],'data','targets','targets.yaml')
 
     Writes:
         $DESI_SPECTRO_SIM/$PIXPROD/{night}/fibermap-{expid}.fits
@@ -206,7 +208,7 @@ def new_exposure(flavor, nspec=5000, night=None, expid=None, tileid=None,
 
     else: # checked that flavor is valid in newexp-desi
         log.debug('Generating {} targets'.format(nspec))
-        fibermap, truth = get_targets_parallel(nspec, flavor, tileid=tileid, seed=seed)
+        fibermap, truth = get_targets_parallel(nspec, flavor, tileid=tileid, seed=seed, targden=target_densities)
 
         flux = truth['FLUX']
         wave = truth['WAVE']

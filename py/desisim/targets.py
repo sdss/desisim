@@ -63,7 +63,7 @@ def get_simtype(spectype, desi_target, bgs_target, mws_target):
     assert np.all(simtype != '???')
     return simtype
 
-def sample_objtype(nobj, flavor):
+def sample_objtype(nobj, flavor, targ_density_dict = {}):
     """
     Return a random sampling of object types (dark, bright, MWS, BGS, ELG, LRG, QSO, STD, BAD_QSO)
 
@@ -81,27 +81,30 @@ def sample_objtype(nobj, flavor):
         - Also ensures at least 2 sky and 1 stdstar, even if nobj is small
     """
     flavor = flavor.upper()
-
-    #- Load target densities
-    #- TODO: what about nobs_boss (BOSS-like LRGs)?
-    #- TODO: This function should be using a desimodel.io function instead of opening desimodel directly.
-    targetyaml = os.path.join(os.environ['DESIMODEL'], 'data', 'targets', 'targets.yaml')
-    targetdat = os.path.join(os.environ['DESIMODEL'], 'data', 'targets', 'targets.dat')
-    if os.path.exists(targetyaml):
-        with open(targetyaml) as fx:
-            tgt = yaml.load(fx)
-    elif os.path.exists(targetdat):
-        log.warn('please svn update {} to get targets.yaml instead of targets.dat'.format(os.environ['DESIMODEL']))
-        with open(targetdat) as fx:
-            tgt = yaml.load(fx)
-            #- Fix some items that got renamed in the new yaml file
-            tgt['nobs_mws'] = tgt['nobs_MWS']
-            tgt['nobs_bgs_bright'] = int(0.6 * tgt['nobs_BG'])
-            tgt['nobs_bgs_faint'] = int(0.4 * tgt['nobs_BG'])
+    override_yaml = ( len(targ_density_dict.keys()) > 0 )
+    if override_yaml:
+        tgt = targ_density_dict
     else:
-        message = 'Unable to read {}'.format(targetyaml)
-        log.error(message)
-        raise IOError(message)
+        #- Load target densities
+        #- TODO: what about nobs_boss (BOSS-like LRGs)?
+        #- TODO: This function should be using a desimodel.io function instead of opening desimodel directly.
+        targetyaml = os.path.join(os.environ['DESIMODEL'], 'data', 'targets', 'targets.yaml')
+        targetdat = os.path.join(os.environ['DESIMODEL'], 'data', 'targets', 'targets.dat')
+        if os.path.exists(targetyaml):
+            with open(targetyaml) as fx:
+                tgt = yaml.load(fx)
+        elif os.path.exists(targetdat):
+            log.warn('please svn update {} to get targets.yaml instead of targets.dat'.format(os.environ['DESIMODEL']))
+            with open(targetdat) as fx:
+                tgt = yaml.load(fx)
+                #- Fix some items that got renamed in the new yaml file
+                tgt['nobs_mws'] = tgt['nobs_MWS']
+                tgt['nobs_bgs_bright'] = int(0.6 * tgt['nobs_BG'])
+                tgt['nobs_bgs_faint'] = int(0.4 * tgt['nobs_BG'])
+        else:
+            message = 'Unable to read {}'.format(targetyaml)
+            log.error(message)
+            raise IOError(message)
 
     # initialize so we can ask for 0 of some kinds of survey targets later
     nlrg = nqso = nelg = nmws = nbgs = nbgs = nmws = 0
@@ -136,14 +139,15 @@ def sample_objtype(nobj, flavor):
         true_objtype += ['ELG',] * nsci
     elif (flavor == 'BRIGHT'):
         #- BGS galaxies and MWS stars
-        #- TODO: split BGS bright vs. faint
         ntgt = float(tgt['nobs_bgs_faint'] + tgt['nobs_bgs_bright'] + tgt['nobs_mws'])
         prob_mws = tgt['nobs_mws'] / ntgt
-        prob_bgs = 1 - prob_mws
+        prob_bgs_b = tgt['nobs_bgs_bright'] / ntgt
+        prob_bgs_f = tgt['nobs_bgs_faint'] / ntgt
 
-        p = [prob_bgs, prob_mws]
-        nbgs, nmws = np.random.multinomial(nsci, p)
-
+        p = [prob_bgs_f, prob_bgs_b, prob_mws]
+        nbgsf, nbgsb, nmws = np.random.multinomial(nsci, p)
+        ngs = nbgsf + nbgsb
+        #- TODO: split BGS bright vs. faint
         true_objtype += ['BGS']*nbgs
         true_objtype += ['MWS_STAR']*nmws
     elif (flavor == 'DARK'):
@@ -185,12 +189,13 @@ def sample_objtype(nobj, flavor):
 
     return true_objtype, target_objtype
 
+
 #- multiprocessing needs one arg, not multiple args
 def _wrap_get_targets(args):
-    nspec, flavor, tileid, seed, specmin = args
-    return get_targets(nspec, flavor, tileid, seed=seed, specmin=specmin)
+    nspec, flavor, tileid, seed, specmin, targden = args
+    return get_targets(nspec, flavor, tileid, seed=seed, specmin=specmin, targdens=targden)
 
-def get_targets_parallel(nspec, flavor, tileid=None, nproc=None, seed=None):
+def get_targets_parallel(nspec, flavor, tileid=None, nproc=None, seed=None, targden = {}):
     import multiprocessing as mp
     if nproc is None:
         nproc = mp.cpu_count() // 2
@@ -198,7 +203,7 @@ def get_targets_parallel(nspec, flavor, tileid=None, nproc=None, seed=None):
     #- don't bother with parallelism if there aren't many targets
     if nspec < 20:
         log.debug('Not Parallelizing get_targets for only {} targets'.format(nspec))
-        return get_targets(nspec, flavor, tileid, seed=seed)
+        return get_targets(nspec, flavor, tileid, seed=seed, targdens=targden)
     else:
         nproc = min(nproc, nspec//10)
         log.debug('Parallelizing get_targets using {} cores'.format(nproc))
@@ -209,9 +214,9 @@ def get_targets_parallel(nspec, flavor, tileid=None, nproc=None, seed=None):
         seeds = np.random.randint(2**32, size=nspec)
         for i in range(0, nspec, n):
             if i+n < nspec:
-                args.append( (n, flavor, tileid, seeds[i], i) )
+                args.append( (n, flavor, tileid, seeds[i], i, targden) )
             else:
-                args.append( (nspec-i, flavor, tileid, seeds[i], i) )
+                args.append( (nspec-i, flavor, tileid, seeds[i], i, targden) )
 
         pool = mp.Pool(nproc)
         results = pool.map(_wrap_get_targets, args)
@@ -310,7 +315,7 @@ def _simspec_truth(truth, wave=None, seed=None):
 
     return simflux, simmeta
 
-def get_targets(nspec, flavor, tileid=None, seed=None, specmin=0):
+def get_targets(nspec, flavor, tileid=None, seed=None, specmin=0, targdens={}):
     """
     Returns:
         fibermap
@@ -328,7 +333,7 @@ def get_targets(nspec, flavor, tileid=None, seed=None, specmin=0):
     np.random.seed(seed)
 
     #- Get distribution of target types
-    true_objtype, target_objtype = sample_objtype(nspec, flavor)
+    true_objtype, target_objtype = sample_objtype(nspec, flavor, targdens)
 
     #- Get DESI wavelength coverage
     wavemin = desimodel.io.load_throughput('b').wavemin
