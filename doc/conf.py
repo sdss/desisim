@@ -140,7 +140,7 @@ autodoc_mock_imports = ['astropy.constants', 'astropy.cosmology',
                         'desimodel.focalplane', 'desimodel.io',
                         'desispec.cosmics', 'desispec.frame',
                         'desispec.fiberflat', 'desispec.fluxcalibration',
-                        'desispec.image',
+                        'desispec.image', 'desispec.parallel',
                         'desispec.io', 'desispec.io.fibermap', 'desispec.io.util',
                         'desispec.interpolation', 'desispec.log',
                         'desispec.resolution', 'desispec.sky',
@@ -150,7 +150,7 @@ autodoc_mock_imports = ['astropy.constants', 'astropy.cosmology',
                         'matplotlib.backends.backend_pdf', 'matplotlib.gridspec',
                         'numpy', 'scipy', 'scipy.constants',
                         'scipy.interpolate', 'scipy.special',
-                        'specsim.simulator', 'fitsio']
+                        'specsim.simulator', 'specsim.config', 'fitsio']
 
 # -- Options for HTML output ----------------------------------------------
 

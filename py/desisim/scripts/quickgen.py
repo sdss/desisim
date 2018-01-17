@@ -2,10 +2,7 @@
 desisim.scripts.quickgen
 ========================
 
-Quickgen quickly simulates pipeline outputs if given input files or brickname.
-This can be run in two distinct modes:
-
-* QUICKGEN MODE
+Quickgen quickly simulates pipeline outputs if given input files.
 
   - must provide simspec and fibermap files via newexp script
   - Number of spectra to be simulated can be given as an argument for quickgen,
@@ -45,27 +42,8 @@ This can be run in two distinct modes:
 
         These files are written to $simdir/{expid}
 
-* QUICKBRICK MODE
-
-  - must provide brickname
-  - Simulates 100 spectra by default, unless nspec keyword is provided
-  - For this option, airmass and exposure time are given directly to quickgen
-  - Brickname is the only required keyword
-  - Simulate bricks (can provide anything as brick name)::
-
-        quickgen --brickname brick
-
-  - quickbrick output::
-
-        1. brick-{arm}-{brickname}.fits : flux calibrated spectra in bricks
-
-        These files are written to the current working directory by default
-
-* additional keyword arguments (descriptions below):
-
-  - common to both modes: nspec, config, seed, moon-phase, moon-angle, moon-zenith
-  - quickgen only: simspec, fibermap, nstart, spectrograph, frameonly
-  - quickbrick only: brickname, objtype, airmass, exptime, outdir, verbose, outdir-truth,
+  - nspec, config, seed, moon-phase, moon-angle, moon-zenith
+  - simspec, fibermap, nstart, spectrograph, frameonly
     zrange-qso, zrange-elg, zrange-lrg, zrange-bgs, sne-rfluxratiorange,
     add-SNeIa
 """
@@ -92,7 +70,7 @@ import desisim.io
 import desisim.templates
 import desiutil.io
 from desispec.resolution import Resolution
-from desispec.io import write_flux_calibration, write_fiberflat, read_fibermap, specprod_root, fitsheader, empty_fibermap, Brick
+from desispec.io import write_flux_calibration, write_fiberflat, read_fibermap, specprod_root, fitsheader, empty_fibermap
 from desispec.interpolation import resample_flux
 from desispec.frame import Frame
 from desispec.fiberflat import FiberFlat
@@ -121,7 +99,7 @@ def _add_truth(hdus, header, meta, trueflux, sflux, wave, channel):
 def parse(options=None):
     parser=argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
-    parser.add_argument('--simspec',type=str, help="input simspec file")
+    parser.add_argument('--simspec',type=str, required=True, help="input simspec file")
     parser.add_argument('--fibermap',type=str, help='input fibermap file')
     parser.add_argument('-n','--nspec',type=int,default=100,help='number of spectra to be simulated, starting from first')
     parser.add_argument('--nstart', type=int, default=0,help='starting spectra # for simulation 0-4999')
@@ -136,10 +114,8 @@ def parse(options=None):
     parser.add_argument('--moon-angle', type=float,  help='separation angle to the moon (0-180 deg)', default=None, metavar='')
     parser.add_argument('--moon-zenith', type=float,  help='zenith angle of the moon (0-90 deg)', default=None, metavar='')
 
-    # Brick options
-    parser.add_argument('-b','--brickname', type=str, help='unique output brickname suffix', metavar='')
     parser.add_argument('--objtype', type=str,  help='ELG, LRG, QSO, BGS, MWS, WD, DARK_MIX, or BRIGHT_MIX', default='DARK_MIX', metavar='')
-    parser.add_argument('-a','--airmass', type=float,  help='airmass', default=1.25, metavar='') # Science Req. Doc L3.3.2
+    parser.add_argument('-a','--airmass', type=float,  help='airmass', default=None, metavar='') 
     parser.add_argument('-e','--exptime', type=float,  help='exposure time (s)', default=None,metavar='')
     parser.add_argument('-o','--outdir', type=str,  help='output directory', default='.', metavar='')
     parser.add_argument('-v','--verbose', action='store_true', help='toggle on verbose output')
@@ -173,11 +149,6 @@ def parse(options=None):
             filename = os.path.basename(args.simspec).replace('simspec', 'fibermap')
             args.fibermap = os.path.join(dirname, filename)
             log.warning('deriving fibermap {} from simspec input filename'.format(args.fibermap))
-
-    if args.simspec is None and args.brickname is None:
-        msg = 'Must have simspec and fibermap files or provide brick name'
-        log.error(msg)
-        raise ValueError(msg)
 
     return args
 
@@ -248,26 +219,12 @@ def main(args):
         NIGHT=fibermap.meta['NIGHT']
         EXPID=fibermap.meta['EXPID']
     else:
-        # Create a blank fake fibermap if bricks; this is re-used by all channels.
+        # Create a blank fake fibermap
         fibermap = empty_fibermap(args.nspec)
         targetids = random_state.randint(2**62, size=args.nspec)
         fibermap['TARGETID'] = targetids
         night = get_night()
         expid = 0
-
-    # Get the appropriate mixture of object types
-    if args.brickname:
-        objtype = args.objtype.upper()
-        known_objtype = ('ELG', 'LRG', 'QSO', 'BGS', 'MWS', 'WD', 'DARK_MIX', 'BRIGHT_MIX')
-        if args.objtype.upper() not in known_objtype:
-            log.critical('Unknown OBJTYPE {}'.format(args.objtype))
-            return -1
-        if objtype == 'DARK_MIX':
-            true_objtype, target_objtype = sample_objtype(args.nspec, 'DARK')
-        elif objtype == 'BRIGHT_MIX':
-            true_objtype, target_objtype = sample_objtype(args.nspec, 'BRIGHT')
-        else:
-            true_objtype = np.tile(np.array([objtype]),(args.nspec))
 
     log.info("Initializing SpecSim with config {}".format(args.config))
     desiparams = load_desiparams()
@@ -422,63 +379,61 @@ def main(args):
         flavor = simspec.flavor
         log.warning('Maybe using an outdated simspec file with flavor={}'.format(flavor))
 
-    # Set airmass and exptime
-    if args.simspec:
-        if 'AIRMASS' in simspec.header:
-            qsim.atmosphere.airmass = simspec.header['AIRMASS']
-        qsim.observation.exposure_time = simspec.header['EXPTIME'] * u.s
-    else:
+    # Set airmass
+    if args.airmass is not None:
         qsim.atmosphere.airmass = args.airmass
-        if args.exptime is None:
-            if objtype in bright_objects:
-                qsim.observation.exposure_time = desiparams['exptime_bright'] * u.s
-            else:
-                qsim.observation.exposure_time = desiparams['exptime_dark'] * u.s
-        else:
-            qsim.observation.exposure_time = args.exptime * u.s
-
-    # Set moon parameters
-    if flavor in bright_objects or object_type in bright_objects:
-        if args.moon_phase is None:
-            qsim.atmosphere.moon.moon_phase = 0.7
-        else:
-            qsim.atmosphere.moon.moon_phase = args.moon_phase
-        if args.moon_angle is None:
-            qsim.atmosphere.moon.separation_angle = 50 * u.deg
-        else:
-            qsim.atmosphere.moon.separation_angle = args.moon_angle * u.deg
-        if args.moon_zenith is None:
-            qsim.atmosphere.moon.moon_zenith = 30 * u.deg
-        else:
-            qsim.atmosphere.moon.moon_zenith = args.moon_zenith * u.deg
-    elif flavor in gray_objects:
-        if args.moon_phase is None:
-            qsim.atmosphere.moon.moon_phase = 0.1
-        else:
-            qsim.atmosphere.moon.moon_phase = args.moon_phase
-        if args.moon_angle is None:
-            qsim.atmosphere.moon.separation_angle = 60 * u.deg
-        else:
-            qsim.atmosphere.moon.separation_angle = args.moon_angle * u.deg
-        if args.moon_zenith is None:
-            qsim.atmosphere.moon.moon_zenith = 80 * u.deg
-        else:
-            qsim.atmosphere.moon.moon_zenith = args.moon_zenith * u.deg
+    elif args.simspec and 'AIRMASS' in simspec.header:
+        qsim.atmosphere.airmass = simspec.header['AIRMASS']
     else:
-        if args.moon_phase is None:
-            qsim.atmosphere.moon.moon_phase = 0.5
-        else:
-            qsim.atmosphere.moon.moon_phase = args.moon_phase
-        if args.moon_angle is None:
-            qsim.atmosphere.moon.separation_angle = 60 * u.deg
-        else:
-            qsim.atmosphere.moon.separation_angle = args.moon_angle * u.deg
-        if args.moon_zenith is None:
-            qsim.atmosphere.moon.moon_zenith = 100 * u.deg
-        else:
-            qsim.atmosphere.moon.moon_zenith = args.moon_zenith * u.deg
+        qsim.atmosphere.airmass =  1.25   # Science Req. Doc L3.3.2
+        
+    # Set exptime
+    if args.exptime is not None:
+        qsim.observation.exposure_time = args.exptime * u.s
+    elif args.simspec and 'EXPTIME' in simspec.header:
+        qsim.observation.exposure_time = simspec.header['EXPTIME'] * u.s
+    elif objtype in bright_objects:
+        qsim.observation.exposure_time = desiparams['exptime_bright'] * u.s
+    else:
+        qsim.observation.exposure_time = desiparams['exptime_dark'] * u.s
 
-    # Initialize per-camera output arrays that will be saved to the brick files.
+    # Set Moon Phase
+    if args.moon_phase is not None:
+        qsim.atmosphere.moon.moon_phase = args.moon_phase
+    elif args.simspec and 'MOONFRAC' in simspec.header:
+        qsim.atmosphere.moon.moon_phase = simspec.header['MOONFRAC']
+    elif flavor in bright_objects or object_type in bright_objects:
+        qsim.atmosphere.moon.moon_phase = 0.7
+    elif flavor in gray_objects:
+        qsim.atmosphere.moon.moon_phase = 0.1
+    else:
+        qsim.atmosphere.moon.moon_phase = 0.5
+        
+    # Set Moon Zenith
+    if args.moon_zenith is not None:
+        qsim.atmosphere.moon.moon_zenith = args.moon_zenith * u.deg
+    elif args.simspec and 'MOONALT' in simspec.header:
+        qsim.atmosphere.moon.moon_zenith = simspec.header['MOONALT'] * u.deg
+    elif flavor in bright_objects or object_type in bright_objects:
+        qsim.atmosphere.moon.moon_zenith = 30 * u.deg
+    elif flavor in gray_objects:
+        qsim.atmosphere.moon.moon_zenith = 80 * u.deg
+    else:
+        qsim.atmosphere.moon.moon_zenith = 100 * u.deg
+
+    # Set Moon - Object Angle
+    if args.moon_angle is not None:
+        qsim.atmosphere.moon.separation_angle = args.moon_angle * u.deg
+    elif args.simspec and 'MOONSEP' in simspec.header:
+        qsim.atmosphere.moon.separation_angle = simspec.header['MOONSEP'] * u.deg
+    elif flavor in bright_objects or object_type in bright_objects:
+        qsim.atmosphere.moon.separation_angle = 50 * u.deg
+    elif flavor in gray_objects:
+        qsim.atmosphere.moon.separation_angle = 60 * u.deg
+    else:
+        qsim.atmosphere.moon.separation_angle = 60 * u.deg
+
+    # Initialize per-camera output arrays that will be saved
     waves, trueflux, noisyflux, obsivar, resolution, sflux = {}, {}, {}, {}, {}, {}
 
     maxbin = 0
@@ -500,9 +455,9 @@ def main(args):
         sky_ivar = np.zeros((nmax,3,maxbin)) # inverse variance of sky
         sky_rand_noise = np.zeros((nmax,3,maxbin)) # random Gaussian noise to sky only
         frame_rand_noise = np.zeros((nmax,3,maxbin)) # random Gaussian noise to nobj+nsky
-        trueflux[camera.name] = np.empty((args.nspec, nwave)) # calibrated brick flux
-        noisyflux[camera.name] = np.empty((args.nspec, nwave)) # brick flux with noise
-        obsivar[camera.name] = np.empty((args.nspec, nwave)) # inverse variance of brick flux
+        trueflux[camera.name] = np.empty((args.nspec, nwave)) # calibrated flux
+        noisyflux[camera.name] = np.empty((args.nspec, nwave)) # observed flux with noise
+        obsivar[camera.name] = np.empty((args.nspec, nwave)) # inverse variance of flux
         if args.simspec:
             dw = np.gradient(simspec.wave[camera.name])
         else:
@@ -549,20 +504,7 @@ def main(args):
     fluxunits = 1e-17 * u.erg / (u.s * u.cm ** 2 * u.Angstrom)
     for j in range(args.nspec):
 
-        if args.brickname:
-            spectra = truth['FLUX']
-            # If objtype is QSO_BAD or TEST then simulate a star
-            if (truth['OBJTYPE'][j] == 'MWS' or truth['OBJTYPE'][j] == 'MWS_STAR' or \
-                truth['OBJTYPE'][j] == 'STD' or truth['OBJTYPE'][j] == 'QSO_BAD' or \
-                truth['OBJTYPE'][j] == 'WD' or truth['OBJTYPE'][j] == 'TEST'):
-                thisobjtype = 'STAR'
-            elif truth['OBJTYPE'][j] == 'BGS':
-                thisobjtype = 'ELG' # TODO (@moustakas): Fix this!
-            else:
-                thisobjtype = truth['OBJTYPE'][j]
-        else:
-            thisobjtype = objtype[j]
-
+        thisobjtype = objtype[j]
         sys.stdout.flush()
         if flavor == 'arc':
             qsim.source.update_in(
@@ -576,9 +518,6 @@ def main(args):
 
         qsim.simulate()
         qsim.generate_random_noise(random_state)
-
-        if args.brickname:
-            sflux[j][:] = 1e17 * qsim.source.flux_out.to(fluxunits).value
 
         for i, output in enumerate(qsim.camera_output):
             assert output['observed_flux'].unit == 1e17 * fluxunits
@@ -634,125 +573,93 @@ def main(args):
 
         # Now write the outputs in DESI standard file system. None of the output file can have more than 500 spectra
 
-        # Output brick files
-        if args.brickname:
-            filename = 'brick-{}-{}.fits'.format(channel, args.brickname)
-            filepath = os.path.join(args.outdir, filename)
-            if os.path.exists(filepath):
-                os.remove(filepath)
-            log.debug('Writing {}'.format(filepath))
+        # Looping over spectrograph
+        for ii in range((args.nspec+args.nstart-1)//500+1):
 
-            header = dict(BRICKNAM=args.brickname, CHANNEL=channel)
-            brick = Brick(filepath, mode='update', header=header)
-            brick.add_objects(noisyflux[channel], obsivar[channel],
-                waves[channel], resolution[channel], fibermap, night, expid)
-            brick.close()
+            start=max(500*ii,args.nstart) # first spectrum for a given spectrograph
+            end=min(500*(ii+1),nmax) # last spectrum for the spectrograph
 
-            # Append truth to the file. Note: we add the resolution-convolved true
-            # flux, not the high resolution source flux, which makes chi2
-            # calculations easier.
-            header = fitsheader(header)
-            if args.outdir_truth is None : # add truth in same file
-                fx = fits.open(filepath, mode='append')
-                _add_truth(fx, header, meta, trueflux, sflux, wavelengths, channel)
-                fx.flush()
-                fx.close()
-            else:
-                filename = 'truth-brick-{}-{}.fits'.format(channel, args.brickname)
-                filepath = os.path.join(args.outdir_truth, filename)
-                hdulist = fits.HDUList([fits.PrimaryHDU(header=header)])
-                _add_truth(hdulist, header, meta, trueflux, sflux, wavelengths, channel)
-                hdulist.writeto(filepath, clobber=True)
-            log.info("Wrote file {}".format(filepath))
+            if (args.spectrograph <= ii):
+                camera = "{}{}".format(channel, ii)
+                log.info("Writing files for channel:{}, spectrograph:{}, spectra:{} to {}".format(channel,ii,start,end))
+                num_pixels = len(waves[channel])
 
-        else:
-            # Looping over spectrograph
-            for ii in range((args.nspec+args.nstart-1)//500+1):
+                # Write frame file
+                framefileName=desispec.io.findfile("frame",NIGHT,EXPID,camera)
 
-                start=max(500*ii,args.nstart) # first spectrum for a given spectrograph
-                end=min(500*(ii+1),nmax) # last spectrum for the spectrograph
+                frame_flux=nobj[start:end,armName[channel],:num_pixels]+ \
+                nsky[start:end,armName[channel],:num_pixels] + \
+                frame_rand_noise[start:end,armName[channel],:num_pixels]
+                frame_ivar=nivar[start:end,armName[channel],:num_pixels]
 
-                if (args.spectrograph <= ii):
-                    camera = "{}{}".format(channel, ii)
-                    log.info("Writing files for channel:{}, spectrograph:{}, spectra:{} to {}".format(channel,ii,start,end))
-                    num_pixels = len(waves[channel])
+                sh1=frame_flux.shape[0]  # required for slicing the resolution metric, resolusion matrix has (nspec,ndiag,wave)
+                                          # for example if nstart =400, nspec=150: two spectrographs:
+                                          # 400-499=> 0 spectrograph, 500-549 => 1
+                if (args.nstart==start):
+                    resol=resolution[channel][:sh1,:,:]
+                else:
+                    resol=resolution[channel][-sh1:,:,:]
 
-                    # Write frame file
-                    framefileName=desispec.io.findfile("frame",NIGHT,EXPID,camera)
+                # must create desispec.Frame object
+                frame=Frame(waves[channel], frame_flux, frame_ivar,\
+                    resolution_data=resol, spectrograph=ii, \
+                    fibermap=fibermap[start:end], \
+                    meta=dict(CAMERA=camera, FLAVOR=simspec.flavor) )
+                desispec.io.write_frame(framefileName, frame)
 
-                    frame_flux=nobj[start:end,armName[channel],:num_pixels]+ \
-                    nsky[start:end,armName[channel],:num_pixels] + \
-                    frame_rand_noise[start:end,armName[channel],:num_pixels]
-                    frame_ivar=nivar[start:end,armName[channel],:num_pixels]
+                framefilePath=desispec.io.findfile("frame",NIGHT,EXPID,camera)
+                log.info("Wrote file {}".format(framefilePath))
 
-                    sh1=frame_flux.shape[0]  # required for slicing the resolution metric, resolusion matrix has (nspec,ndiag,wave)
-                                              # for example if nstart =400, nspec=150: two spectrographs:
-                                              # 400-499=> 0 spectrograph, 500-549 => 1
-                    if (args.nstart==start):
-                        resol=resolution[channel][:sh1,:,:]
-                    else:
-                        resol=resolution[channel][-sh1:,:,:]
+                if args.frameonly or simspec.flavor == 'arc':
+                    continue
 
-                    # must create desispec.Frame object
-                    frame=Frame(waves[channel], frame_flux, frame_ivar,\
-                        resolution_data=resol, spectrograph=ii, \
-                        fibermap=fibermap[start:end], \
-                        meta=dict(CAMERA=camera, FLAVOR=simspec.flavor) )
-                    desispec.io.write_frame(framefileName, frame)
+                # Write cframe file
+                cframeFileName=desispec.io.findfile("cframe",NIGHT,EXPID,camera)
+                cframeFlux=cframe_observedflux[start:end,armName[channel],:num_pixels]+cframe_rand_noise[start:end,armName[channel],:num_pixels]
+                cframeIvar=cframe_ivar[start:end,armName[channel],:num_pixels]
 
-                    framefilePath=desispec.io.findfile("frame",NIGHT,EXPID,camera)
-                    log.info("Wrote file {}".format(framefilePath))
+                # must create desispec.Frame object
+                cframe = Frame(waves[channel], cframeFlux, cframeIvar, \
+                    resolution_data=resol, spectrograph=ii,
+                    fibermap=fibermap[start:end],
+                    meta=dict(CAMERA=camera, FLAVOR=simspec.flavor) )
+                desispec.io.frame.write_frame(cframeFileName,cframe)
 
-                    if args.frameonly or simspec.flavor == 'arc':
-                        continue
+                cframefilePath=desispec.io.findfile("cframe",NIGHT,EXPID,camera)
+                log.info("Wrote file {}".format(cframefilePath))
 
-                    # Write cframe file
-                    cframeFileName=desispec.io.findfile("cframe",NIGHT,EXPID,camera)
-                    cframeFlux=cframe_observedflux[start:end,armName[channel],:num_pixels]+cframe_rand_noise[start:end,armName[channel],:num_pixels]
-                    cframeIvar=cframe_ivar[start:end,armName[channel],:num_pixels]
+                # Write sky file
+                skyfileName=desispec.io.findfile("sky",NIGHT,EXPID,camera)
+                skyflux=nsky[start:end,armName[channel],:num_pixels] + \
+                sky_rand_noise[start:end,armName[channel],:num_pixels]
+                skyivar=sky_ivar[start:end,armName[channel],:num_pixels]
+                skymask=np.zeros(skyflux.shape, dtype=np.uint32)
 
-                    # must create desispec.Frame object
-                    cframe = Frame(waves[channel], cframeFlux, cframeIvar, \
-                        resolution_data=resol, spectrograph=ii,
-                        fibermap=fibermap[start:end],
-                        meta=dict(CAMERA=camera, FLAVOR=simspec.flavor) )
-                    desispec.io.frame.write_frame(cframeFileName,cframe)
+                # must create desispec.Sky object
+                skymodel = SkyModel(waves[channel], skyflux, skyivar, skymask,
+                    header=dict(CAMERA=camera))
+                desispec.io.sky.write_sky(skyfileName, skymodel)
 
-                    cframefilePath=desispec.io.findfile("cframe",NIGHT,EXPID,camera)
-                    log.info("Wrote file {}".format(cframefilePath))
+                skyfilePath=desispec.io.findfile("sky",NIGHT,EXPID,camera)
+                log.info("Wrote file {}".format(skyfilePath))
 
-                    # Write sky file
-                    skyfileName=desispec.io.findfile("sky",NIGHT,EXPID,camera)
-                    skyflux=nsky[start:end,armName[channel],:num_pixels] + \
-                    sky_rand_noise[start:end,armName[channel],:num_pixels]
-                    skyivar=sky_ivar[start:end,armName[channel],:num_pixels]
-                    skymask=np.zeros(skyflux.shape, dtype=np.uint32)
+                # Write calib file
+                calibVectorFile=desispec.io.findfile("calib",NIGHT,EXPID,camera)
+                flux = cframe_observedflux[start:end,armName[channel],:num_pixels]
+                phot = nobj[start:end,armName[channel],:num_pixels]
+                calibration = np.zeros_like(phot)
+                jj = (flux>0)
+                calibration[jj] = phot[jj] / flux[jj]
 
-                    # must create desispec.Sky object
-                    skymodel = SkyModel(waves[channel], skyflux, skyivar, skymask,
-                        header=dict(CAMERA=camera))
-                    desispec.io.sky.write_sky(skyfileName, skymodel)
+                #- TODO: what should calibivar be?
+                #- For now, model it as the noise of combining ~10 spectra
+                calibivar=10/cframe_ivar[start:end,armName[channel],:num_pixels]
+                #mask=(1/calibivar>0).astype(int)??
+                mask=np.zeros(calibration.shape, dtype=np.uint32)
 
-                    skyfilePath=desispec.io.findfile("sky",NIGHT,EXPID,camera)
-                    log.info("Wrote file {}".format(skyfilePath))
+                # write flux calibration
+                fluxcalib = FluxCalib(waves[channel], calibration, calibivar, mask)
+                write_flux_calibration(calibVectorFile, fluxcalib)
 
-                    # Write calib file
-                    calibVectorFile=desispec.io.findfile("calib",NIGHT,EXPID,camera)
-                    flux = cframe_observedflux[start:end,armName[channel],:num_pixels]
-                    phot = nobj[start:end,armName[channel],:num_pixels]
-                    calibration = np.zeros_like(phot)
-                    jj = (flux>0)
-                    calibration[jj] = phot[jj] / flux[jj]
-
-                    #- TODO: what should calibivar be?
-                    #- For now, model it as the noise of combining ~10 spectra
-                    calibivar=10/cframe_ivar[start:end,armName[channel],:num_pixels]
-                    #mask=(1/calibivar>0).astype(int)??
-                    mask=np.zeros(calibration.shape, dtype=np.uint32)
-
-                    # write flux calibration
-                    fluxcalib = FluxCalib(waves[channel], calibration, calibivar, mask)
-                    write_flux_calibration(calibVectorFile, fluxcalib)
-
-                    calibfilePath=desispec.io.findfile("calib",NIGHT,EXPID,camera)
-                    log.info("Wrote file {}".format(calibfilePath))
+                calibfilePath=desispec.io.findfile("calib",NIGHT,EXPID,camera)
+                log.info("Wrote file {}".format(calibfilePath))

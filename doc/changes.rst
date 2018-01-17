@@ -2,7 +2,66 @@
 desisim change log
 ==================
 
-0.21.0 (unreleased)
+0.23.1 (unreleased)
+-------------------
+
+* Support new LRG templates (v2.0). (`PR #302`_).
+* Bug fixes and additional features added to SIMQSO template maker. (`PR
+  #303`_).
+* Fixes quickspectra (broken by desispec change) (`PR #306`_).
+* Optionally do not wavelength resample simqso templates (`PR #310`_).
+* Default to basis templates v2.4 instead of 2.3
+
+.. _`PR #302`: https://github.com/desihub/desisim/pull/302
+.. _`PR #303`: https://github.com/desihub/desisim/pull/303
+.. _`PR #306`: https://github.com/desihub/desisim/pull/306
+.. _`PR #310`: https://github.com/desihub/desisim/pull/310
+
+0.23.0 (2017-12-20)
+-------------------
+
+* Fixed crash in newexp-mock success print message.
+* Refactor DLA code into its own module (`PR #294`_).
+* Adds reader for LyA skewer v2.x format (`PR #297`_).
+* Removed deprecated brick output from quickgen.
+* Preliminary support for simqso based QSO templates (`PR #293`_).
+* fastframe can directly output cframes (`PR #287`_).
+* adds BGS efficiency notebooks (`PR #285`_ and `PR #286`_).
+
+.. _`PR #285`: https://github.com/desihub/desisim/pull/285
+.. _`PR #286`: https://github.com/desihub/desisim/pull/286
+.. _`PR #287`: https://github.com/desihub/desisim/pull/287
+.. _`PR #294`: https://github.com/desihub/desisim/pull/294
+.. _`PR #293`: https://github.com/desihub/desisim/pull/293
+.. _`PR #294`: https://github.com/desihub/desisim/pull/294
+.. _`PR #297`: https://github.com/desihub/desisim/pull/297
+
+0.22.0 (2017-11-10)
+-------------------
+
+* Scaling updates to wrap-fastframe and wrap-newexp (`PR #274`_).
+* Fix a minor units scaling bug in lya_spectra (`PR #264`_).
+* newexp takes exposures list with EXPID and arcs/flats (`PR #275`_).
+* lyman alpha QSOs with optional DLAs (`PR #275`_).
+* Update arc lamp line list (`PR #272`_).
+* Fix MPI pixsim wrappers (`PR #265`_ and `PR #262`_).
+* quicksurvey updats for latest surveysim outputs (`PR #270`_).
+* Adds fastfiber method of fiber input loss calculations (`PR #261`_).
+* Fix quickgen moon input parameters (`PR #263`_).
+* Adds quickspectra script (`PR #259`_).
+
+.. _`PR #264`: https://github.com/desihub/desisim/pull/264
+.. _`PR #274`: https://github.com/desihub/desisim/pull/274
+.. _`PR #275`: https://github.com/desihub/desisim/pull/275
+.. _`PR #272`: https://github.com/desihub/desisim/pull/272
+.. _`PR #265`: https://github.com/desihub/desisim/pull/265
+.. _`PR #270`: https://github.com/desihub/desisim/pull/270
+.. _`PR #261`: https://github.com/desihub/desisim/pull/261
+.. _`PR #262`: https://github.com/desihub/desisim/pull/262
+.. _`PR #263`: https://github.com/desihub/desisim/pull/263
+.. _`PR #259`: https://github.com/desihub/desisim/pull/259
+
+0.21.0 (2017-09-29)
 -------------------
 
 * Major refactor of newexp to add connection to upstream mocks, surveysims,
@@ -16,10 +75,15 @@ desisim change log
 * New plots for S/N of spectra for various objects (ELG, LRG, QSO) (`PR #254`_)
 * Add BGS, MWS to z_find QA
 * Miscellaneous polishing in QA (velocity, clip before RMS, extend [OII] flux, S/N per Ang)
+* Bug fix: correctly select both "bright" and "faint" BGS templates by default
+  (`PR #257`_).  
+* Updates for newexp/fastframe wrappers for end-to-end sims (`PR #258`_).
 
 .. _`PR #250`: https://github.com/desihub/desisim/pull/250
 .. _`PR #252`: https://github.com/desihub/desisim/pull/252
 .. _`PR #254`: https://github.com/desihub/desisim/pull/254
+.. _`PR #257`: https://github.com/desihub/desisim/pull/257
+.. _`PR #258`: https://github.com/desihub/desisim/pull/258
 
 0.20.0 (2017-07-12)
 -------------------
@@ -55,6 +119,7 @@ desisim change log
 0.18.3 (2017-04-13)
 -------------------
 
+* Add DLAs to lya spectra (PR #220)
 * Fix quickgen for specsim v0.8 (`PR #226`_).
 * Add verbose output to templates code (`PR #230`_).
 * Much faster quickcat (`PR #233`_).
