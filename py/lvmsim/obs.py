@@ -19,20 +19,21 @@ import astropy.units as u
 import lvmmodel.io
 import lvmspec.io
 from lvmspec.interpolation import resample_flux
-
-from lvmutil.log import get_logger
-log = get_logger()
-
 from .targets import get_targets_parallel
 from . import io
 import lvmsim.simexp
 from .simexp import simulate_spectra
+from lvmutil.log import get_logger
+from lvmmodel.io import load_lvmparams
+
+log = get_logger()
+
 
 def new_exposure(program, nspec=5000, night=None, expid=None, tileid=None,
                  nproc=None, seed=None, obsconditions=None,
                  specify_targets=dict(), testslit=False, exptime=None,
                  arc_lines_filename=None, flat_spectrum_filename=None,
-                 outdir=None):
+                 outdir=None, config='desi', telescope=None):
     """
     Create a new exposure and output input simulation files.
     Does not generate pixel-level simulations or noisy spectra.
@@ -56,6 +57,8 @@ def new_exposure(program, nspec=5000, night=None, expid=None, tileid=None,
         * arc_lines_filename : use alternate arc lines filename (used if program="arc")
         * flat_spectrum_filename : use alternate flat spectrum filename (used if program="flat")
         * outdir: output directory
+        * config: the yaml configuration to load
+        * telescope: the telescope used (i.e. 1m, 160mm)
 
     Writes to outdir or $LVM_SPECTRO_SIM/$PIXPROD/{night}/
         * fibermap-{expid}.fits
@@ -160,7 +163,7 @@ def new_exposure(program, nspec=5000, night=None, expid=None, tileid=None,
 
     #- all other programs
     fibermap, (flux, wave, meta) = get_targets_parallel(nspec, program,
-        tileid=tileid, nproc=nproc, seed=seed, specify_targets=specify_targets)
+        tileid=tileid, nproc=nproc, seed=seed, specify_targets=specify_targets, config=config, telescope=telescope)
 
     if obsconditions is None:
         if program in ['dark', 'lrg', 'qso']:
@@ -182,7 +185,8 @@ def new_exposure(program, nspec=5000, night=None, expid=None, tileid=None,
     if exptime is not None:
         obsconditions['EXPTIME'] = exptime
 
-    sim = simulate_spectra(wave, flux, fibermap=fibermap, obsconditions=obsconditions)
+    lvmparams = load_lvmparams(config=config, telescope=telescope)
+    sim = simulate_spectra(wave, flux, fibermap=fibermap, obsconditions=obsconditions, config_name=config, params=lvmparams)
 
     #- Write fibermap
     telera, teledec = io.get_tile_radec(tileid)

@@ -17,7 +17,7 @@ from lvmutil.log import get_logger
 import lvmspec.io
 import lvmspec.io.util
 import lvmmodel.io
-import desitarget
+import lvmtarget
 from lvmspec.spectra import Spectra
 from lvmspec.resolution import Resolution
 import matplotlib.pyplot as plt
@@ -65,7 +65,7 @@ def sim_spectra(wave, flux, program, spectra_filename, obsconditions=None, sourc
     frame_fibermap.meta["EXPID"]=expid
 
     # add LVM_TARGET
-    tm = desitarget.desi_mask
+    tm = lvmtarget.desi_mask
     frame_fibermap['LVM_TARGET'][sourcetype=="star"]=tm.STD_FSTAR
     frame_fibermap['LVM_TARGET'][sourcetype=="lrg"]=tm.LRG
     frame_fibermap['LVM_TARGET'][sourcetype=="elg"]=tm.ELG

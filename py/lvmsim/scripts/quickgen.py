@@ -158,26 +158,17 @@ def parse(options=None):
     return args
 
 
-def main(args):
+def setup_envs():
+    ''' Set up the environment and directory structure '''
 
-    # Set up the logger
-    if args.verbose:
-        log = get_logger(DEBUG)
-    else:
-        log = get_logger()
-
-    # Make sure all necessary environment variables are set
     LVM_SPECTRO_REDUX_DIR = "./quickGen"
 
     if 'LVM_SPECTRO_REDUX' not in os.environ:
-
         log.info('LVM_SPECTRO_REDUX environment is not set.')
-
     else:
         LVM_SPECTRO_REDUX_DIR = os.environ['LVM_SPECTRO_REDUX']
 
     if os.path.exists(LVM_SPECTRO_REDUX_DIR):
-
         if not os.path.isdir(LVM_SPECTRO_REDUX_DIR):
             raise RuntimeError("Path %s Not a directory" % LVM_SPECTRO_REDUX_DIR)
     else:
@@ -194,7 +185,6 @@ def main(args):
     prod_Dir = specprod_root()
 
     if os.path.exists(prod_Dir):
-
         if not os.path.isdir(prod_Dir):
             raise RuntimeError("Path %s Not a directory" % prod_Dir)
     else:
@@ -202,6 +192,240 @@ def main(args):
             os.makedirs(prod_Dir)
         except:
             raise
+
+
+def get_fibermap(fmapfile, log=None, nspec=None):
+    ''' Get the fibermap table
+
+    The fibermap table contains (simulated) information about the
+    position of each target in the focal plane
+
+    The fibermap contains the fiber positioner configuration information for
+    each exposure: what fiber is placed where, what target that is, etc.
+
+    http://desidatamodel.readthedocs.io/en/latest/DESI_SPECTRO_DATA/NIGHT/fibermap-EXPID.html
+
+    Parameters:
+        fmapfile (str):
+            An input fibermap filename
+        log (logger):
+            A Python logger
+        nspec (int):
+            The number of spectra to simulate
+
+    Returns:
+        fibermap (Table):
+            An Astropy table of the simulated fibers on the focal plane.
+        objtype (array):
+            An array of object source types, one for each fiber
+        night (int):
+            The night of observation
+        expid (int):
+            The exposure id
+
+    '''
+
+    objtype = None
+    if fmapfile:
+        # read the fibermap file to get the object information
+        if log:
+            log.info("Reading fibermap file {}".format(fmapfile))
+        fibermap = read_fibermap(fmapfile)
+        objtype = get_source_types(fibermap)
+        stdindx = np.where(objtype == 'STD')  # match STD with STAR
+        mwsindx = np.where(objtype == 'MWS_STAR')  # match MWS_STAR with STAR
+        bgsindx = np.where(objtype == 'BGS')  # match BGS with LRG
+        objtype[stdindx] = 'STAR'
+        objtype[mwsindx] = 'STAR'
+        objtype[bgsindx] = 'LRG'
+        night = fibermap.meta['NIGHT']
+        expid = fibermap.meta['EXPID']
+    else:
+        # create a new empty fake fibermap object
+        if log:
+            log.info('Creating empty fibermap')
+        assert nspec is not None, 'nspec is required to create an empty fibermap'
+        fibermap = empty_fibermap(nspec)
+        targetids = random_state.randint(2**62, size=nspec)
+        fibermap['TARGETID'] = targetids
+        night = get_night()
+        expid = 0
+
+    return fibermap, objtype, night, expid
+
+
+def get_simspec(simspecfile, log=None, nspec=None):
+    ''' Get the simspec object
+
+    The simspec table holds the "truth" spectra and the intrinsic properties
+    of each object (redshift, noiseless photometry, [OII] flux, etc.).
+    (Input spectra to simulate with pixsim.)
+
+    http://desidatamodel.readthedocs.io/en/latest/DESI_SPECTRO_SIM/PIXPROD/NIGHT/simspec-EXPID.html
+
+    Parameters:
+        simspecfile (str):
+            The filename of the input simspec file
+
+    '''
+
+    minwave = 3533.
+    maxwave = 9913.1
+    stepwave = 0.2
+    scale = 1.e17
+    exptime = 5.  # typical BOSS exposure time in s
+
+    if simspecfile:
+        if log:
+            log.info('Reading input file {}'.format(args.simspec))
+        # create SimSpec object
+        simspec = lvmsim.io.read_simspec(args.simspec)
+        # number of spectra to simulate from SimSpec
+        sim_nspec = simspec.nspec
+
+        # get the spectra and wavelengths arrays for different flavors
+        if simspec.flavor == 'arc':
+            # - TODO: do we need quickgen to support arcs?  For full pipeline
+            # - arcs are used to measure PSF but aren't extracted except for
+            # - debugging.
+            # - TODO: if we do need arcs, this needs to be redone.
+            # - conversion from phot to flux doesn't include throughput,
+            # - and arc lines are rebinned to nearest 0.2 A.
+
+            # Create full wavelength and flux arrays for arc exposure
+            wave_b = np.array(simspec.wave['b'])
+            wave_r = np.array(simspec.wave['r'])
+            wave_z = np.array(simspec.wave['z'])
+            phot_b = np.array(simspec.phot['b'][0])
+            phot_r = np.array(simspec.phot['r'][0])
+            phot_z = np.array(simspec.phot['z'][0])
+            sim_wave = np.concatenate((wave_b, wave_r, wave_z))
+            sim_phot = np.concatenate((phot_b, phot_r, phot_z))
+            wavelengths = np.arange(minwave, maxwave, stepwave)
+            phot = np.zeros(len(wavelengths))
+            for i in range(len(sim_wave)):
+                wavelength = sim_wave[i]
+                flux_index = np.argmin(abs(wavelength - wavelengths))
+                phot[flux_index] = sim_phot[i]
+            # Convert photons to flux: following specter conversion method
+            dw = np.gradient(wavelengths)
+            fibarea = const.pi * (1.07e-2 / 2) ** 2  # cross-sectional fiber area in cm^2
+            hc = scale * const.h * const.c  # convert to erg A
+            spectra = (hc * exptime * fibarea * dw * phot) / wavelengths
+        else:
+            wavelengths = simspec.wave['brz']
+            spectra = simspec.flux
+
+        # check there's enough spectra to simulate from what we ask for
+        if sim_nspec < nspec:
+            log.info("Only {} spectra in input file".format(sim_nspec))
+            nspec = sim_nspec
+    else:
+        # Initialize the output truth table.
+        spectra = []
+        wavelengths = qsim.source.wavelength_out.to(u.Angstrom).value
+        npix = len(wavelengths)
+        truth = dict()
+        meta = Table()
+        truth['OBJTYPE'] = np.zeros(args.nspec, dtype=(str, 10))
+        truth['FLUX'] = np.zeros((args.nspec, npix))
+        truth['WAVE'] = wavelengths
+        jj = list()
+
+        for thisobj in set(true_objtype):
+            ii = np.where(true_objtype == thisobj)[0]
+            nobj = len(ii)
+            truth['OBJTYPE'][ii] = thisobj
+            if log:
+                log.info('Generating {} template'.format(thisobj))
+
+            # Generate the templates
+            if thisobj == 'ELG':
+                elg = lvmsim.templates.ELG(wave=wavelengths, add_SNeIa=args.add_SNeIa)
+                flux, tmpwave, meta1 = elg.make_templates(nmodel=nobj, seed=args.seed, zrange=args.zrange_elg,
+                                                          sne_rfluxratiorange=args.sne_rfluxratiorange)
+            elif thisobj == 'LRG':
+                lrg = lvmsim.templates.LRG(wave=wavelengths, add_SNeIa=args.add_SNeIa)
+                flux, tmpwave, meta1 = lrg.make_templates(nmodel=nobj, seed=args.seed, zrange=args.zrange_lrg,
+                                                          sne_rfluxratiorange=args.sne_rfluxratiorange)
+            elif thisobj == 'QSO':
+                qso = lvmsim.templates.QSO(wave=wavelengths)
+                flux, tmpwave, meta1 = qso.make_templates(nmodel=nobj, seed=args.seed, zrange=args.zrange_qso)
+            elif thisobj == 'BGS':
+                bgs = lvmsim.templates.BGS(wave=wavelengths, add_SNeIa=args.add_SNeIa)
+                flux, tmpwave, meta1 = bgs.make_templates(nmodel=nobj, seed=args.seed, zrange=args.zrange_bgs,
+                                                          rmagrange=args.rmagrange_bgs,
+                                                          sne_rfluxratiorange=args.sne_rfluxratiorange)
+            elif thisobj == 'STD':
+                fstd = lvmsim.templates.FSTD(wave=wavelengths)
+                flux, tmpwave, meta1 = fstd.make_templates(nmodel=nobj, seed=args.seed)
+            elif thisobj == 'QSO_BAD':  # use STAR template no color cuts
+                star = lvmsim.templates.STAR(wave=wavelengths)
+                flux, tmpwave, meta1 = star.make_templates(nmodel=nobj, seed=args.seed)
+            elif thisobj == 'MWS_STAR' or thisobj == 'MWS':
+                mwsstar = lvmsim.templates.MWS_STAR(wave=wavelengths)
+                flux, tmpwave, meta1 = mwsstar.make_templates(nmodel=nobj, seed=args.seed)
+            elif thisobj == 'WD':
+                wd = lvmsim.templates.WD(wave=wavelengths)
+                flux, tmpwave, meta1 = wd.make_templates(nmodel=nobj, seed=args.seed)
+            elif thisobj == 'SKY':
+                flux = np.zeros((nobj, npix))
+                meta1 = Table(dict(REDSHIFT=np.zeros(nobj, dtype=np.float32)))
+            elif thisobj == 'TEST':
+                flux = np.zeros((args.nspec, npix))
+                indx = np.where(wave > 5800.0 - 1E-6)[0][0]
+                ref_integrated_flux = 1E-10
+                ref_cst_flux_density = 1E-17
+                single_line = (np.arange(args.nspec) % 2 == 0).astype(np.float32)
+                continuum = (np.arange(args.nspec) % 2 == 1).astype(np.float32)
+
+                for spec in range(nspec):
+                    flux[spec, indx] = single_line[spec] * ref_integrated_flux / np.gradient(wavelengths)[indx]  # single line
+                    flux[spec] += continuum[spec] * ref_cst_flux_density  # flat continuum
+
+                meta1 = Table(dict(REDSHIFT=np.zeros(args.nspec, dtype=np.float32),
+                                   LINE=wave[indx] * np.ones(args.nspec, dtype=np.float32),
+                                   LINEFLUX=single_line * ref_integrated_flux,
+                                   CONSTFLUXDENSITY=continuum * ref_cst_flux_density))
+            else:
+                raise RuntimeError('Unknown object type')
+
+            # Pack it in.
+            truth['FLUX'][ii] = flux
+            meta = vstack([meta, meta1])
+            jj.append(ii.tolist())
+
+            # Sanity check on units; templates currently return ergs, not 1e-17 ergs...
+            # assert (thisobj == 'SKY') or (np.max(truth['FLUX']) < 1e-6)
+
+        # Sort the metadata table.
+        jj = sum(jj, [])
+        meta_new = Table()
+        for k in range(nspec):
+            index = int(np.where(np.array(jj) == k)[0])
+            meta_new = vstack([meta_new, meta[index]])
+        meta = meta_new
+
+        # Add TARGETID and the true OBJTYPE to the metadata table.
+        meta.add_column(Column(true_objtype, dtype=(str, 10), name='TRUE_OBJTYPE'))
+        meta.add_column(Column(targetids, name='TARGETID'))
+
+        # Rename REDSHIFT -> TRUEZ anticipating later table joins with zbest.Z
+        meta.rename_column('REDSHIFT', 'TRUEZ')
+
+    return spectra, wavelengths, nspec
+
+
+def main(args):
+
+    # Set up the logger
+    if args.verbose:
+        log = get_logger(DEBUG)
+    else:
+        log = get_logger()
+
+    # Make sure all necessary environment variables are set
+    setup_envs()
 
     # Initialize random number generator to use.
     np.random.seed(args.seed)
@@ -212,26 +436,9 @@ def main(args):
         args.spectrograph = args.nstart / args.n_fibers
 
     # Read fibermapfile to get object type, night and expid
-    if args.fibermap:
-        log.info("Reading fibermap file {}".format(args.fibermap))
-        fibermap = read_fibermap(args.fibermap)
-        objtype = get_source_types(fibermap)
-        stdindx = np.where(objtype == 'STD')  # match STD with STAR
-        mwsindx = np.where(objtype == 'MWS_STAR')  # match MWS_STAR with STAR
-        bgsindx = np.where(objtype == 'BGS')  # match BGS with LRG
-        objtype[stdindx] = 'STAR'
-        objtype[mwsindx] = 'STAR'
-        objtype[bgsindx] = 'LRG'
-        NIGHT = fibermap.meta['NIGHT']
-        EXPID = fibermap.meta['EXPID']
-    else:
-        # Create a blank fake fibermap
-        fibermap = empty_fibermap(args.nspec)
-        targetids = random_state.randint(2**62, size=args.nspec)
-        fibermap['TARGETID'] = targetids
-        night = get_night()
-        expid = 0
+    fibermap, objtype, night, expid = get_fibermap(args.fibermap, log=log, nspec=args.nspec)
 
+    # Initialize the spectral simulator
     log.info("Initializing SpecSim with config {}".format(args.config))
     lvmparams = load_lvmparams(config=args.config, telescope=args.telescope)
     qsim = get_simulator(args.config, num_fibers=1, params=lvmparams)
@@ -298,20 +505,20 @@ def main(args):
             # Generate the templates
             if thisobj == 'ELG':
                 elg = lvmsim.templates.ELG(wave=wavelengths, add_SNeIa=args.add_SNeIa)
-                flux, tmpwave, meta1 = elg.make_templates(nmodel=nobj, seed=args.seed,
-                    zrange=args.zrange_elg, sne_rfluxratiorange=args.sne_rfluxratiorange)
+                flux, tmpwave, meta1 = elg.make_templates(nmodel=nobj, seed=args.seed, zrange=args.zrange_elg,
+                                                          sne_rfluxratiorange=args.sne_rfluxratiorange)
             elif thisobj == 'LRG':
                 lrg = lvmsim.templates.LRG(wave=wavelengths, add_SNeIa=args.add_SNeIa)
-                flux, tmpwave, meta1 = lrg.make_templates(nmodel=nobj, seed=args.seed,
-                    zrange=args.zrange_lrg, sne_rfluxratiorange=args.sne_rfluxratiorange)
+                flux, tmpwave, meta1 = lrg.make_templates(nmodel=nobj, seed=args.seed, zrange=args.zrange_lrg,
+                                                          sne_rfluxratiorange=args.sne_rfluxratiorange)
             elif thisobj == 'QSO':
                 qso = lvmsim.templates.QSO(wave=wavelengths)
-                flux, tmpwave, meta1 = qso.make_templates(nmodel=nobj, seed=args.seed,
-                    zrange=args.zrange_qso)
+                flux, tmpwave, meta1 = qso.make_templates(nmodel=nobj, seed=args.seed, zrange=args.zrange_qso)
             elif thisobj == 'BGS':
                 bgs = lvmsim.templates.BGS(wave=wavelengths, add_SNeIa=args.add_SNeIa)
-                flux, tmpwave, meta1 = bgs.make_templates(nmodel=nobj, seed=args.seed,
-                    zrange=args.zrange_bgs, rmagrange=args.rmagrange_bgs, sne_rfluxratiorange=args.sne_rfluxratiorange)
+                flux, tmpwave, meta1 = bgs.make_templates(nmodel=nobj, seed=args.seed, zrange=args.zrange_bgs,
+                                                          rmagrange=args.rmagrange_bgs,
+                                                          sne_rfluxratiorange=args.sne_rfluxratiorange)
             elif thisobj == 'STD':
                 fstd = lvmsim.templates.FSTD(wave=wavelengths)
                 flux, tmpwave, meta1 = fstd.make_templates(nmodel=nobj, seed=args.seed)
@@ -369,6 +576,8 @@ def main(args):
 
         # Rename REDSHIFT -> TRUEZ anticipating later table joins with zbest.Z
         meta.rename_column('REDSHIFT', 'TRUEZ')
+
+    # ---------- end simspec
 
     # explicitly set location on focal plane if needed to support airmass
     # variations when using specsim v0.5
@@ -455,8 +664,7 @@ def main(args):
     maxbin = 0
     nmax = args.nspec
     for camera in qsim.instrument.cameras:
-        # Lookup this camera's resolution matrix and convert to the sparse
-        # format used in lvmspec.
+        # Lookup this camera's resolution matrix and convert to the sparse format used in lvmspec.
         R = Resolution(camera.get_output_resolution_matrix())
         resolution[camera.name] = np.tile(R.to_fits_array(), [args.nspec, 1, 1])
         waves[camera.name] = (camera.output_wavelength.to(u.Angstrom).value.astype(np.float32))
@@ -500,7 +708,7 @@ def main(args):
 
                 for kk in range((args.nspec + args.nstart - 1) // args.n_fibers + 1):
                     camera = channel + str(kk)
-                    outfile = lvmspec.io.findfile('fiberflat', NIGHT, EXPID, camera)
+                    outfile = lvmspec.io.findfile('fiberflat', night, expid, camera)
                     start = max(args.n_fibers * kk, args.nstart)
                     end = min(args.n_fibers * (kk + 1), nmax)
 
@@ -512,13 +720,14 @@ def main(args):
                         ivar[start:end, :], mask[start:end, :], meanspec,
                         header=dict(CAMERA=camera))
                     write_fiberflat(outfile, ff)
-                    filePath = lvmspec.io.findfile("fiberflat", NIGHT, EXPID, camera)
+                    filePath = lvmspec.io.findfile("fiberflat", night, expid, camera)
                     log.info("Wrote file {}".format(filePath))
 
             sys.exit(0)
 
     # Repeat the simulation for all spectra
-    fluxunits = 1e-17 * u.erg / (u.s * u.cm ** 2 * u.Angstrom)
+    scale = 1e-17
+    fluxunits = scale * u.erg / (u.s * u.cm ** 2 * u.Angstrom)
     for j in range(args.nspec):
 
         thisobjtype = objtype[j]
@@ -603,7 +812,7 @@ def main(args):
                 num_pixels = len(waves[channel])
 
                 # Write frame file
-                framefileName = lvmspec.io.findfile("frame", NIGHT, EXPID, camera)
+                framefileName = lvmspec.io.findfile("frame", night, expid, camera)
 
                 frame_flux = nobj[start:end, armName[channel], :num_pixels] + \
                     nsky[start:end, armName[channel], :num_pixels] + \
@@ -627,14 +836,14 @@ def main(args):
                               meta=dict(CAMERA=camera, FLAVOR=simspec.flavor))
                 lvmspec.io.write_frame(framefileName, frame)
 
-                framefilePath = lvmspec.io.findfile("frame", NIGHT, EXPID, camera)
+                framefilePath = lvmspec.io.findfile("frame", night, expid, camera)
                 log.info("Wrote file {}".format(framefilePath))
 
                 if args.frameonly or simspec.flavor == 'arc':
                     continue
 
                 # Write cframe file
-                cframeFileName = lvmspec.io.findfile("cframe", NIGHT, EXPID, camera)
+                cframeFileName = lvmspec.io.findfile("cframe", night, expid, camera)
                 cframeFlux = cframe_observedflux[start:end, armName[channel], :num_pixels] + \
                     cframe_rand_noise[start:end, armName[channel], :num_pixels]
                 cframeIvar = cframe_ivar[start:end, armName[channel], :num_pixels]
@@ -646,11 +855,11 @@ def main(args):
                                meta=dict(CAMERA=camera, FLAVOR=simspec.flavor))
                 lvmspec.io.frame.write_frame(cframeFileName, cframe)
 
-                cframefilePath = lvmspec.io.findfile("cframe", NIGHT, EXPID, camera)
+                cframefilePath = lvmspec.io.findfile("cframe", night, expid, camera)
                 log.info("Wrote file {}".format(cframefilePath))
 
                 # Write sky file
-                skyfileName = lvmspec.io.findfile("sky", NIGHT, EXPID, camera)
+                skyfileName = lvmspec.io.findfile("sky", night, expid, camera)
                 skyflux = nsky[start:end, armName[channel], :num_pixels] + \
                     sky_rand_noise[start:end, armName[channel], :num_pixels]
                 skyivar = sky_ivar[start:end, armName[channel], :num_pixels]
@@ -661,11 +870,11 @@ def main(args):
                                     header=dict(CAMERA=camera))
                 lvmspec.io.sky.write_sky(skyfileName, skymodel)
 
-                skyfilePath = lvmspec.io.findfile("sky", NIGHT, EXPID, camera)
+                skyfilePath = lvmspec.io.findfile("sky", night, expid, camera)
                 log.info("Wrote file {}".format(skyfilePath))
 
                 # Write calib file
-                calibVectorFile = lvmspec.io.findfile("calib", NIGHT, EXPID, camera)
+                calibVectorFile = lvmspec.io.findfile("calib", night, expid, camera)
                 flux = cframe_observedflux[start:end, armName[channel], :num_pixels]
                 phot = nobj[start:end, armName[channel], :num_pixels]
                 calibration = np.zeros_like(phot)
@@ -682,5 +891,5 @@ def main(args):
                 fluxcalib = FluxCalib(waves[channel], calibration, calibivar, mask)
                 write_flux_calibration(calibVectorFile, fluxcalib)
 
-                calibfilePath = lvmspec.io.findfile("calib", NIGHT, EXPID, camera)
+                calibfilePath = lvmspec.io.findfile("calib", night, expid, camera)
                 log.info("Wrote file {}".format(calibfilePath))

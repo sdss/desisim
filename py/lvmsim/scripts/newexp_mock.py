@@ -90,7 +90,7 @@ def main(args=None):
     program = obs['PROGRAM']
 
     if os.path.isdir(args.fiberassign):
-        #- TODO: move file location logic to lvmspec / desitarget / fiberassign
+        #- TODO: move file location logic to lvmspec / lvmtarget / fiberassign
         args.fiberassign = os.path.join(args.fiberassign, 'tile_{:05d}.fits'.format(tileid))
 
     fiberassign = astropy.table.Table.read(args.fiberassign, 'FIBER_ASSIGNMENTS')

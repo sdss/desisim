@@ -50,8 +50,11 @@ def get_simulator(config='lvm', num_fibers=1, params=None):
     else:
         key = (config, num_fibers)
 
+    parammsg = 'with telescope {0}'.format(params['telescope']) if params else ''
+    msg = '{0} Simulator for {1} {2}'.format(key, config, parammsg)
+
     if key in _simulators:
-        log.debug('Returning cached {} Simulator'.format(key))
+        log.debug('Returning cached {0}'.format(msg))
         qsim = _simulators[key]
         defaults = _simdefaults[key]
         qsim.source.focal_xy = defaults['focal_xy']
@@ -62,10 +65,10 @@ def get_simulator(config='lvm', num_fibers=1, params=None):
         qsim.atmosphere.moon.moon_zenith = defaults['moon_zenith']
 
     else:
-        log.debug('Creating new {} Simulator'.format(key))
+        log.debug('Creating new {0}'.format(msg))
 
         # - New config; create Simulator object
-        qsim = specsim.simulator.Simulator(config, num_fibers)
+        qsim = specsim.simulator.Simulator(config, num_fibers, params=params)
 
         # - Cache defaults to reset back to original state later
         defaults = dict()
@@ -80,7 +83,8 @@ def get_simulator(config='lvm', num_fibers=1, params=None):
         _simdefaults[key] = defaults
 
         # update the parameters
-        update_params(qsim, params)
+        if params:
+            update_params(qsim, params)
 
     return qsim
 

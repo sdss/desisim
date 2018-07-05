@@ -262,8 +262,8 @@ class GALAXY(object):
           colorcuts_function (function name): Function to use to select
             templates that pass the color-cuts for the specified objtype Note
             that this argument can also be a tuple of more than one selection
-            function to apply (e.g., desitarget.cuts.isBGS_faint and
-            desitarget.cuts.isBGS_bright) which will be applied in sequence
+            function to apply (e.g., lvmtarget.cuts.isBGS_faint and
+            lvmtarget.cuts.isBGS_bright) which will be applied in sequence
             (default None).
           normfilter (str): normalize each spectrum to the magnitude in this
             filter bandpass (default 'decam2014-r').
@@ -802,7 +802,7 @@ class ELG(GALAXY):
 
         """
         if colorcuts_function is None:
-            from desitarget.cuts import isELG as colorcuts_function
+            from lvmtarget.cuts import isELG as colorcuts_function
 
         super(ELG, self).__init__(objtype='ELG', minwave=minwave, maxwave=maxwave,
                                   cdelt=cdelt, wave=wave, colorcuts_function=colorcuts_function,
@@ -881,8 +881,8 @@ class BGS(GALAXY):
 
         """
         if colorcuts_function is None:
-            from desitarget.cuts import isBGS_bright
-            from desitarget.cuts import isBGS_faint
+            from lvmtarget.cuts import isBGS_bright
+            from lvmtarget.cuts import isBGS_faint
             colorcuts_function = (isBGS_bright, isBGS_faint)
 
         super(BGS, self).__init__(objtype='BGS', minwave=minwave, maxwave=maxwave,
@@ -956,7 +956,7 @@ class LRG(GALAXY):
 
         """
         if colorcuts_function is None:
-            from desitarget.cuts import isLRG_colors as colorcuts_function
+            from lvmtarget.cuts import isLRG_colors as colorcuts_function
 
         super(LRG, self).__init__(objtype='LRG', minwave=minwave, maxwave=maxwave,
                                   cdelt=cdelt, wave=wave, colorcuts_function=colorcuts_function,
@@ -1427,7 +1427,7 @@ class FSTD(SUPERSTAR):
 
         """
         if colorcuts_function is None:
-            from desitarget.cuts import isFSTD_colors as colorcuts_function
+            from lvmtarget.cuts import isFSTD_colors as colorcuts_function
 
         super(FSTD, self).__init__(objtype='FSTD', minwave=minwave, maxwave=maxwave,
                                    cdelt=cdelt, wave=wave, colorcuts_function=colorcuts_function,
@@ -1489,7 +1489,7 @@ class MWS_STAR(SUPERSTAR):
 
         """
         if colorcuts_function is None:
-            from desitarget.cuts import isMWSSTAR_colors as colorcuts_function
+            from lvmtarget.cuts import isMWSSTAR_colors as colorcuts_function
         super(MWS_STAR, self).__init__(objtype='MWS_STAR', minwave=minwave, maxwave=maxwave,
                                        cdelt=cdelt, wave=wave, colorcuts_function=colorcuts_function,
                                        normfilter=normfilter, baseflux=baseflux, basewave=basewave,
@@ -1650,10 +1650,10 @@ class QSO():
 
         if colorcuts_function is None:
             try:
-                from desitarget.cuts import isQSO_colors as colorcuts_function
+                from lvmtarget.cuts import isQSO_colors as colorcuts_function
             except ImportError:
-                log.error('Please upgrade desitarget to get the latest isQSO_colors function.')
-                from desitarget.cuts import isQSO as colorcuts_function
+                log.error('Please upgrade lvmtarget to get the latest isQSO_colors function.')
+                from lvmtarget.cuts import isQSO as colorcuts_function
 
         self.colorcuts_function = colorcuts_function
         self.normfilter = normfilter
@@ -2021,10 +2021,10 @@ class SIMQSO():
 
         if colorcuts_function is None:
             try:
-                from desitarget.cuts import isQSO_colors as colorcuts_function
+                from lvmtarget.cuts import isQSO_colors as colorcuts_function
             except ImportError:
-                log.error('Please upgrade desitarget to get the latest isQSO_colors function.')
-                from desitarget.cuts import isQSO as colorcuts_function
+                log.error('Please upgrade lvmtarget to get the latest isQSO_colors function.')
+                from lvmtarget.cuts import isQSO as colorcuts_function
 
         self.colorcuts_function = colorcuts_function
         self.normfilter = normfilter

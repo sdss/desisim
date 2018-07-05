@@ -16,18 +16,19 @@ import yaml
 
 from astropy.table import Table, Column, hstack
 
+from lvmsim import io
 from lvmmodel.focalplane import FocalPlane
 from lvmsim.io import empty_metatable, empty_star_properties
-import lvmmodel.io
 from lvmutil.log import get_logger
+import lvmmodel.io
+from lvmutil import brick
+from lvmspec.io.fibermap import empty_fibermap
+from lvmtarget.targetmask import desi_mask, bgs_mask, mws_mask
+import lvmsim.templates as temps
+
+
 log = get_logger()
 
-from lvmutil import brick
-import lvmmodel.io
-from lvmspec.io.fibermap import empty_fibermap
-from desitarget.targetmask import desi_mask, bgs_mask, mws_mask
-
-from lvmsim import io
 
 def get_simtype(spectype, desi_target, bgs_target, mws_target):
     '''
@@ -41,7 +42,7 @@ def get_simtype(spectype, desi_target, bgs_target, mws_target):
 
     TODO: add subtypes of STAR
     '''
-    simtype = np.zeros(len(spectype), dtype=(str,6))
+    simtype = np.zeros(len(spectype), dtype=(str, 6))
     simtype[:] = '???'
 
     isGalaxy = (spectype == 'GALAXY')
@@ -57,7 +58,7 @@ def get_simtype(spectype, desi_target, bgs_target, mws_target):
     # this is introduced in the case of contaminants for mocks
     # where spectype != desi_target.
     # We assume that spectype=="Truth" and desi_target=="targeting information"
-    isELG |= isGalaxy & ((desi_target & desi_mask.QSO) !=0 )
+    isELG |= isGalaxy & ((desi_target & desi_mask.QSO) != 0)
 
     simtype[isLRG] = 'LRG'
     simtype[isELG] = 'ELG'
@@ -70,6 +71,7 @@ def get_simtype(spectype, desi_target, bgs_target, mws_target):
 #    print(len(simtype), np.count_nonzero(simtype=='???'), spectype, type(spectype))
     assert np.all(simtype != '???')
     return simtype
+
 
 def sample_objtype(nobj, program):
     """
@@ -90,43 +92,43 @@ def sample_objtype(nobj, program):
     """
     program = program.upper()
 
-    #- Load target densities
+    # - Load target densities
     tgt = lvmmodel.io.load_target_info()
 
     # initialize so we can ask for 0 of some kinds of survey targets later
     nlrg = nqso = nelg = nmws = nbgs = nbgs = nmws = 0
-    #- Fraction of sky and standard star targets is guaranteed
+    # - Fraction of sky and standard star targets is guaranteed
     nsky = int(tgt['frac_sky'] * nobj)
     nstd = int(tgt['frac_std'] * nobj)
 
-    #- Assure at least 2 sky and 1 std
+    # - Assure at least 2 sky and 1 std
     if nobj >= 3:
         if nstd < 1:
             nstd = 1
         if nsky < 2:
             nsky = 2
 
-    #- Number of science fibers available
-    nsci = nobj - (nsky+nstd)
-    true_objtype  = ['SKY']*nsky + ['STD']*nstd
+    # - Number of science fibers available
+    nsci = nobj - (nsky + nstd)
+    true_objtype = ['SKY'] * nsky + ['STD'] * nstd
 
     if (program == 'MWS'):
-        true_objtype  +=  ['MWS_STAR']*nsci
+        true_objtype += ['MWS_STAR'] * nsci
     elif (program == 'QSO'):
-        true_objtype  +=  ['QSO']*nsci
+        true_objtype += ['QSO'] * nsci
     elif (program == 'ELG'):
-        true_objtype  +=  ['ELG']*nsci
+        true_objtype += ['ELG'] * nsci
     elif (program == 'LRG'):
-        true_objtype  +=  ['LRG']*nsci
+        true_objtype += ['LRG'] * nsci
     elif (program == 'STD'):
-        true_objtype  +=  ['STD']*nsci
+        true_objtype += ['STD'] * nsci
     elif (program == 'BGS'):
-        true_objtype  +=  ['BGS']*nsci
+        true_objtype += ['BGS'] * nsci
     elif (program in ('GRAY', 'GREY')):
-        true_objtype += ['ELG',] * nsci
+        true_objtype += ['ELG', ] * nsci
     elif (program == 'BRIGHT'):
-        #- BGS galaxies and MWS stars
-        #- TODO: split BGS bright vs. faint
+        # - BGS galaxies and MWS stars
+        # - TODO: split BGS bright vs. faint
         ntgt = float(tgt['nobs_bgs_faint'] + tgt['nobs_bgs_bright'] + tgt['nobs_mws'])
         prob_mws = tgt['nobs_mws'] / ntgt
         prob_bgs = 1 - prob_mws
@@ -134,10 +136,10 @@ def sample_objtype(nobj, program):
         p = [prob_bgs, prob_mws]
         nbgs, nmws = np.random.multinomial(nsci, p)
 
-        true_objtype += ['BGS']*nbgs
-        true_objtype += ['MWS_STAR']*nmws
+        true_objtype += ['BGS'] * nbgs
+        true_objtype += ['MWS_STAR'] * nmws
     elif (program == 'DARK'):
-        #- LRGs ELGs QSOs
+        # - LRGs ELGs QSOs
         ntgt = float(tgt['nobs_lrg'] + tgt['nobs_elg'] + tgt['nobs_qso'] + tgt['nobs_lya'] + tgt['ntarget_badqso'])
         prob_lrg = tgt['nobs_lrg'] / ntgt
         prob_elg = tgt['nobs_elg'] / ntgt
@@ -147,19 +149,19 @@ def sample_objtype(nobj, program):
         p = [prob_lrg, prob_elg, prob_qso, prob_badqso]
         nlrg, nelg, nqso, nbadqso = np.random.multinomial(nsci, p)
 
-        true_objtype += ['ELG']*nelg
-        true_objtype += ['LRG']*nlrg
-        true_objtype += ['QSO']*nqso + ['QSO_BAD']*nbadqso
+        true_objtype += ['ELG'] * nelg
+        true_objtype += ['LRG'] * nlrg
+        true_objtype += ['QSO'] * nqso + ['QSO_BAD'] * nbadqso
     elif program == 'SKY':
-        #- override everything else and just return sky objects
+        # - override everything else and just return sky objects
         nlrg = nqso = nelg = nmws = nbgs = nbgs = nmws = nstd = 0
         nsky = nobj
-        true_objtype = ['SKY',] * nobj
+        true_objtype = ['SKY', ] * nobj
     else:
-        raise ValueError("Do not know the objtype mix for program "+ program)
+        raise ValueError("Do not know the objtype mix for program " + program)
 
     assert len(true_objtype) == nobj, \
-        'len(true_objtype) mismatch for program {} : {} != {}'.format(\
+        'len(true_objtype) mismatch for program {} : {} != {}'.format(
         program, len(true_objtype), nobj)
     np.random.shuffle(true_objtype)
 
@@ -175,12 +177,16 @@ def sample_objtype(nobj, program):
 
     return true_objtype, target_objtype
 
-#- multiprocessing needs one arg, not multiple args
-def _wrap_get_targets(args):
-    nspec, program, tileid, seed, specify_targets, specmin = args
-    return get_targets(nspec, program, tileid, seed=seed, specify_targets=specify_targets, specmin=specmin)
 
-def get_targets_parallel(nspec, program, tileid=None, nproc=None, seed=None, specify_targets=dict()):
+# - multiprocessing needs one arg, not multiple args
+def _wrap_get_targets(args):
+    nspec, program, tileid, seed, specify_targets, specmin, config, telescope = args
+    return get_targets(nspec, program, tileid, seed=seed, specify_targets=specify_targets,
+                       specmin=specmin, config=config, telescope=telescope)
+
+
+def get_targets_parallel(nspec, program, tileid=None, nproc=None, seed=None,
+                         specify_targets=dict(), config=None, telescope=None):
     '''
     Parallel wrapper for get_targets()
 
@@ -190,41 +196,42 @@ def get_targets_parallel(nspec, program, tileid=None, nproc=None, seed=None, spe
     if nproc is None:
         nproc = mp.cpu_count() // 2
 
-    #- don't bother with parallelism if there aren't many targets
+    # - don't bother with parallelism if there aren't many targets
     if nspec < 20:
         log.debug('Not Parallelizing get_targets for only {} targets'.format(nspec))
-        return get_targets(nspec, program, tileid, seed=seed, specify_targets=specify_targets)
+        return get_targets(nspec, program, tileid, seed=seed, specify_targets=specify_targets,
+                           config=config, telescope=telescope)
     else:
-        nproc = min(nproc, nspec//10)
+        nproc = min(nproc, nspec // 10)
         log.debug('Parallelizing get_targets using {} cores'.format(nproc))
         args = list()
         n = nspec // nproc
-        #- Generate random seeds for each process to use as a random seed
+        # - Generate random seeds for each process to use as a random seed
         np.random.seed(seed)
         seeds = np.random.randint(2**32, size=nspec)
         for i in range(0, nspec, n):
-            if i+n < nspec:
-                args.append( (n, program, tileid, seeds[i], specify_targets, i) )
+            if i + n < nspec:
+                args.append((n, program, tileid, seeds[i], specify_targets, i, config, telescope))
             else:
-                args.append( (nspec-i, program, tileid, seeds[i], specify_targets, i) )
+                args.append((nspec - i, program, tileid, seeds[i], specify_targets, i, config, telescope))
 
         pool = mp.Pool(nproc)
         results = pool.map(_wrap_get_targets, args)
         fibermaps, targets = list(zip(*results))
         fibermap = np.concatenate(fibermaps)
 
-        #- wave should be the same for all targets
+        # - wave should be the same for all targets
         wave = targets[0][1]
 
-        #- vstack for arrays, hstack for tables
+        # - vstack for arrays, hstack for tables
         flux = np.vstack([tx[0] for tx in targets])
         meta = np.hstack([tx[2] for tx in targets])
 
-        #- Fix FIBER and SPECTROID entries in fibermap
+        # - Fix FIBER and SPECTROID entries in fibermap
         fibermap['FIBER'] = np.arange(nspec)
         fibermap['SPECTROID'] = fibermap['FIBER'] // 500
 
-        #- Check dimensionality
+        # - Check dimensionality
         nspec, nwave = flux.shape
         assert len(fibermap) == nspec
         assert len(meta) == nspec
@@ -232,7 +239,8 @@ def get_targets_parallel(nspec, program, tileid=None, nproc=None, seed=None, spe
 
         return fibermap, (flux, wave, meta)
 
-def get_targets(nspec, program, tileid=None, seed=None, specify_targets=dict(), specmin=0):
+
+def get_targets(nspec, program, tileid=None, seed=None, specify_targets=dict(), specmin=0, config=None, telescope=None):
     """
     Generates a set of targets for the requested program
 
@@ -262,12 +270,12 @@ def get_targets(nspec, program, tileid=None, seed=None, specify_targets=dict(), 
     log.debug('Using random seed {}'.format(seed))
     np.random.seed(seed)
 
-    #- Get distribution of target types
+    # - Get distribution of target types
     true_objtype, target_objtype = sample_objtype(nspec, program)
 
-    #- Get DESI wavelength coverage
+    # - Get DESI wavelength coverage
     try:
-        params = lvmmodel.io.load_desiparams()
+        params = lvmmodel.io.load_lvmparams(config=config, telescope=telescope)
         wavemin = params['ccd']['b']['wavemin']
         wavemax = params['ccd']['z']['wavemax']
     except KeyError:
@@ -277,7 +285,7 @@ def get_targets(nspec, program, tileid=None, seed=None, specify_targets=dict(), 
     wave = np.arange(round(wavemin, 1), wavemax, dw)
     nwave = len(wave)
 
-    flux = np.zeros( (nspec, len(wave)) )
+    flux = np.zeros((nspec, len(wave)))
     meta = empty_metatable(nmodel=nspec, objtype='SKY')
     fibermap = empty_fibermap(nspec)
 
@@ -298,27 +306,23 @@ def get_targets(nspec, program, tileid=None, seed=None, specify_targets=dict(), 
             continue
 
         elif objtype == 'ELG':
-            from lvmsim.templates import ELG
-            elg = ELG(wave=wave)
+            elg = temps.ELG(wave=wave)
             simflux, wave1, meta1 = elg.make_templates(nmodel=nobj, seed=seed, **obj_kwargs)
             fibermap['LVM_TARGET'][ii] = desi_mask.ELG
 
         elif objtype == 'LRG':
-            from lvmsim.templates import LRG
-            lrg = LRG(wave=wave)
+            lrg = temps.LRG(wave=wave)
             simflux, wave1, meta1 = lrg.make_templates(nmodel=nobj, seed=seed, **obj_kwargs)
             fibermap['LVM_TARGET'][ii] = desi_mask.LRG
 
         elif objtype == 'BGS':
-            from lvmsim.templates import BGS
-            bgs = BGS(wave=wave)
+            bgs = temps.BGS(wave=wave)
             simflux, wave1, meta1 = bgs.make_templates(nmodel=nobj, seed=seed, **obj_kwargs)
             fibermap['LVM_TARGET'][ii] = desi_mask.BGS_ANY
             fibermap['BGS_TARGET'][ii] = bgs_mask.BGS_BRIGHT
 
         elif objtype == 'QSO':
-            from lvmsim.templates import QSO
-            qso = QSO(wave=wave)
+            qso = temps.QSO(wave=wave)
             simflux, wave1, meta1 = qso.make_templates(nmodel=nobj, seed=seed, lyaforest=False, **obj_kwargs)
             fibermap['LVM_TARGET'][ii] = desi_mask.QSO
 
@@ -330,29 +334,25 @@ def get_targets(nspec, program, tileid=None, seed=None, specify_targets=dict(), 
         # going to need 'noisy' photometry (because the QSO color-cuts
         # explicitly avoid the stellar locus).
         elif objtype == 'QSO_BAD':
-            from lvmsim.templates import STAR
-            #from desitarget.cuts import isQSO
-            #star = STAR(wave=wave, colorcuts_function=isQSO)
-            star = STAR(wave=wave)
+            # star = temps.STAR(wave=wave, colorcuts_function=isQSO)
+            star = temps.STAR(wave=wave)
             simflux, wave1, meta1 = star.make_templates(nmodel=nobj, seed=seed, **obj_kwargs)
             fibermap['LVM_TARGET'][ii] = desi_mask.QSO
 
         elif objtype == 'STD':
-            from lvmsim.templates import FSTD
-            fstd = FSTD(wave=wave)
+            fstd = temps.FSTD(wave=wave)
             simflux, wave1, meta1 = fstd.make_templates(nmodel=nobj, seed=seed, **obj_kwargs)
             fibermap['LVM_TARGET'][ii] = desi_mask.STD_FSTAR
 
         elif objtype == 'MWS_STAR':
-            from lvmsim.templates import MWS_STAR
-            mwsstar = MWS_STAR(wave=wave)
+            mwsstar = temps.MWS_STAR(wave=wave)
             # todo: mag ranges for different programs of STAR targets should be in lvmmodel
             if 'rmagrange' not in obj_kwargs.keys():
-                obj_kwargs['rmagrange'] = (15.0,20.0)
+                obj_kwargs['rmagrange'] = (15.0, 20.0)
             simflux, wave1, meta1 = mwsstar.make_templates(nmodel=nobj, seed=seed, **obj_kwargs)
             fibermap['LVM_TARGET'][ii] = desi_mask.MWS_ANY
-            #- MWS bit names changed after desitarget 0.6.0 so use number
-            #- instead of name for now (bit 0 = mask 1 = MWS_MAIN currently)
+            # - MWS bit names changed after lvmtarget 0.6.0 so use number
+            # - instead of name for now (bit 0 = mask 1 = MWS_MAIN currently)
             fibermap['MWS_TARGET'][ii] = 1
 
         else:
@@ -368,25 +368,25 @@ def get_targets(nspec, program, tileid=None, seed=None, specify_targets=dict(), 
         fibermap['MAG'][ii, 3] = 22.5 - 2.5 * np.log10(meta['FLUX_W1'][ii])
         fibermap['MAG'][ii, 4] = 22.5 - 2.5 * np.log10(meta['FLUX_W2'][ii])
 
-    #- Load fiber -> positioner mapping and tile information
+    # - Load fiber -> positioner mapping and tile information
     fiberpos = lvmmodel.io.load_fiberpos()
 
-    #- Where are these targets?  Centered on positioners for now.
-    x = fiberpos['X'][specmin:specmin+nspec]
-    y = fiberpos['Y'][specmin:specmin+nspec]
+    # - Where are these targets?  Centered on positioners for now.
+    x = fiberpos['X'][specmin:specmin + nspec]
+    y = fiberpos['Y'][specmin:specmin + nspec]
     fp = FocalPlane(tile_ra, tile_dec)
     ra = np.zeros(nspec)
     dec = np.zeros(nspec)
     for i in range(nspec):
         ra[i], dec[i] = fp.xy2radec(x[i], y[i])
 
-    #- Fill in the rest of the fibermap structure
+    # - Fill in the rest of the fibermap structure
     fibermap['FIBER'] = np.arange(nspec, dtype='i4')
-    fibermap['POSITIONER'] = fiberpos['POSITIONER'][specmin:specmin+nspec]
-    fibermap['SPECTROID'] = fiberpos['SPECTROGRAPH'][specmin:specmin+nspec]
+    fibermap['POSITIONER'] = fiberpos['POSITIONER'][specmin:specmin + nspec]
+    fibermap['SPECTROID'] = fiberpos['SPECTROGRAPH'][specmin:specmin + nspec]
     fibermap['TARGETID'] = np.random.randint(sys.maxsize, size=nspec)
     fibermap['TARGETCAT'] = np.zeros(nspec, dtype=(str, 20))
-    fibermap['LAMBDAREF'] = np.ones(nspec, dtype=np.float32)*5400
+    fibermap['LAMBDAREF'] = np.ones(nspec, dtype=np.float32) * 5400
     fibermap['RA_TARGET'] = ra
     fibermap['DEC_TARGET'] = dec
     fibermap['X_TARGET'] = x
@@ -401,41 +401,42 @@ def get_targets(nspec, program, tileid=None, seed=None, specify_targets=dict(), 
 
     return fibermap, (flux, wave, meta)
 
-#-------------------------------------------------------------------------
-#- Currently unused, but keep around for now
+
+# -------------------------------------------------------------------------
+# - Currently unused, but keep around for now
 def sample_nz(objtype, n):
     """
     Given `objtype` = 'LRG', 'ELG', 'QSO', 'STAR', 'STD'
     return array of `n` redshifts that properly sample n(z)
     from $LVMMODEL/data/targets/nz*.dat
     """
-    #- TODO: should this be in lvmmodel instead?
+    # - TODO: should this be in lvmmodel instead?
 
-    #- Stars are at redshift 0 for now.  Could consider a velocity dispersion.
+    # - Stars are at redshift 0 for now.  Could consider a velocity dispersion.
     if objtype in ('STAR', 'STD'):
         return np.zeros(n, dtype=float)
 
-    #- Determine which input n(z) file to use
-    targetdir = os.getenv('LVMMODEL')+'/data/targets/'
+    # - Determine which input n(z) file to use
+    targetdir = os.getenv('LVMMODEL') + '/data/targets/'
     objtype = objtype.upper()
     if objtype == 'LRG':
-        infile = targetdir+'/nz_lrg.dat'
+        infile = targetdir + '/nz_lrg.dat'
     elif objtype == 'ELG':
-        infile = targetdir+'/nz_elg.dat'
+        infile = targetdir + '/nz_elg.dat'
     elif objtype == 'QSO':
-        #- TODO: should use full dNdzdg distribution instead
-        infile = targetdir+'/nz_qso.dat'
+        # - TODO: should use full dNdzdg distribution instead
+        infile = targetdir + '/nz_qso.dat'
     else:
         raise ValueError("objtype {} not recognized (ELG LRG QSO STD STAR)".format(objtype))
 
-    #- Read n(z) distribution
+    # - Read n(z) distribution
     zlo, zhi, ntarget = np.loadtxt(infile, unpack=True)[0:3]
 
-    #- Construct normalized cumulative density function (cdf)
+    # - Construct normalized cumulative density function (cdf)
     cdf = np.cumsum(ntarget, dtype=float)
     cdf /= cdf[-1]
 
-    #- Sample that distribution
+    # - Sample that distribution
     x = np.random.uniform(0.0, 1.0, size=n)
     return np.interp(x, cdf, zhi)
 

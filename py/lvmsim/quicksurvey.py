@@ -7,7 +7,7 @@ a list of tile epochs to observe.
 
 Directly depends on the following DESI products:
 
-* desitarget.mtl
+* lvmtarget.mtl
 * :mod:`lvmsim.quickcat`
 * `fiberassign <https://github.com/desihub/fiberassign>`_
 '''
@@ -24,10 +24,10 @@ import os.path
 from collections import Counter
 from time import time, asctime
 import fitsio
-import desitarget.mtl
+import lvmtarget.mtl
 from lvmsim.quickcat import quickcat
 from astropy.table import join
-from desitarget.targets import desi_mask
+from lvmtarget.targets import desi_mask
 
 class SimSetup(object):
     """Setup to simulate the DESI survey
@@ -231,9 +231,9 @@ class SimSetup(object):
         print("{} Starting MTL".format(asctime()))
         self.mtl_file = os.path.join(self.tmp_output_path, 'mtl.fits')
         if zcat is None:
-            mtl = desitarget.mtl.make_mtl(targets)
+            mtl = lvmtarget.mtl.make_mtl(targets)
         else:
-            mtl = desitarget.mtl.make_mtl(targets, zcat)
+            mtl = lvmtarget.mtl.make_mtl(targets, zcat)
 
         mtl.write(self.mtl_file, overwrite=True)
         del mtl

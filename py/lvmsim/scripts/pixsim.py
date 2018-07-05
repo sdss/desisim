@@ -6,12 +6,14 @@ This is a module.
 """
 from __future__ import absolute_import, division, print_function
 
-import os,sys
+import os
+import sys
 import os.path
 import shutil
 
 import random
 from time import asctime
+from mpi4py import MPI
 
 import numpy as np
 
@@ -19,12 +21,14 @@ import lvmmodel.io
 from lvmutil.log import get_logger
 import lvmspec.io
 from lvmspec.parallel import stdouterr_redirected
+from lvmspec.scripts import preproc
 
 from ..pixsim import simulate
 from ..io import SimSpec
 from .. import obs, io
 
 log = get_logger()
+
 
 def expand_args(args):
     '''expand camera string into list of cameras
@@ -61,11 +65,11 @@ def expand_args(args):
             data = fits.getdata(args.simspec, 'B')
             nspec = data['PHOT'].shape[1]
         except KeyError:
-            #- Try old specsim format instead
+            # - Try old specsim format instead
             hdr = fits.getheader(args.simspec, 'PHOT_B')
             nspec = hdr['NAXIS2']
 
-        nspectrographs = (nspec-1) // 500 + 1
+        nspectrographs = (nspec - 1) // 500 + 1
         args.spectrographs = list(range(nspectrographs))
 
     if (args.night is None) or (args.expid is None):
@@ -79,16 +83,16 @@ def expand_args(args):
     if isinstance(args.spectrographs, str):
         args.spectrographs = [int(x) for x in args.spectrographs.split(',')]
 
-    #- expand camera list
+    # - expand camera list
     if args.cameras is None:
         args.cameras = list()
         for arm in args.arms.split(','):
             for ispec in args.spectrographs:
-                args.cameras.append(arm+str(ispec))
+                args.cameras.append(arm + str(ispec))
     else:
         args.cameras = args.cameras.split(',')
 
-    #- write to same directory as simspec
+    # - write to same directory as simspec
     if args.rawfile is None:
         rawfile = os.path.basename(lvmspec.io.findfile('raw', args.night, args.expid))
         args.rawfile = os.path.join(os.path.dirname(args.simspec), rawfile)
@@ -103,69 +107,49 @@ def expand_args(args):
             outdir=os.path.dirname(os.path.abspath(args.rawfile)))
 
 
-#-------------------------------------------------------------------------
-#- Parse options
+# -------------------------------------------------------------------------
+# - Parse options
 def parse(options=None):
     import argparse
-    parser = argparse.ArgumentParser(
-        description = 'Generates simulated DESI pixel-level raw data',
-        )
+    parser = argparse.ArgumentParser(description='Generates simulated DESI pixel-level raw data',)
 
-    #- Input files
+    # - Input files
     parser.add_argument("--psf", type=str, help="PSF filename")
     parser.add_argument("--cosmics", action="store_true", help="Add cosmics")
-    parser.add_argument("--cosmics_dir", type=str,
-        help="Input directory with cosmics templates")
-    parser.add_argument("--cosmics_file", type=str,
-        help="Input file with cosmics templates")
+    parser.add_argument("--cosmics_dir", type=str, help="Input directory with cosmics templates")
+    parser.add_argument("--cosmics_file", type=str, help="Input file with cosmics templates")
     parser.add_argument("--simspec", type=str, help="input simspec file")
-    parser.add_argument("--fibermap", type=str,
-        help="fibermap file (optional)")
+    parser.add_argument("--fibermap", type=str, help="fibermap file (optional)")
 
-    #- Output options
+    # - Output options
     parser.add_argument("--rawfile", type=str, help="output raw data file")
-    parser.add_argument("--simpixfile", type=str,
-        help="output truth image file")
-    parser.add_argument("--preproc", action="store_true",
-        help="preprocess raw -> pix files")
-    parser.add_argument("--preproc_dir", type=str,
-        help="directory for output preprocessed pix files")
+    parser.add_argument("--simpixfile", type=str, help="output truth image file")
+    parser.add_argument("--preproc", action="store_true", help="preprocess raw -> pix files")
+    parser.add_argument("--preproc_dir", type=str, help="directory for output preprocessed pix files")
 
-    #- Alternately derive inputs/outputs from night, expid, and cameras
+    # - Alternately derive inputs/outputs from night, expid, and cameras
     parser.add_argument("--night", type=str, help="YEARMMDD")
     parser.add_argument("--expid", type=int, help="exposure id")
     parser.add_argument("--cameras", type=str, help="cameras, e.g. b0,r5,z9")
 
-    parser.add_argument("--spectrographs", type=str,
-        help="spectrograph numbers, e.g. 0,1,9")
-    parser.add_argument("--arms", type=str,
-        help="spectrograph arms, e.g. b,r,z", default='b,r,z')
+    parser.add_argument("--spectrographs", type=str, help="spectrograph numbers, e.g. 0,1,9")
+    parser.add_argument("--arms", type=str, help="spectrograph arms, e.g. b,r,z", default='b,r,z')
 
-    parser.add_argument("--ccd_npix_x", type=int,
-        help="for testing; number of x (columns) to include in output",
-        default=None)
-    parser.add_argument("--ccd_npix_y", type=int,
-        help="for testing; number of y (rows) to include in output",
-        default=None)
+    parser.add_argument("--ccd_npix_x", type=int, default=None,
+                        help="for testing; number of x (columns) to include in output")
+    parser.add_argument("--ccd_npix_y", type=int, default=None,
+                        help="for testing; number of y (rows) to include in output")
 
-    parser.add_argument("--verbose", action="store_true",
-        help="Include debug log info")
-    parser.add_argument("--overwrite", action="store_true",
-        help="Overwrite existing raw and simpix files")
+    parser.add_argument("--verbose", action="store_true", help="Include debug log info")
+    parser.add_argument("--overwrite", action="store_true", help="Overwrite existing raw and simpix files")
     parser.add_argument("--seed", type=int, help="random number seed")
 
-    parser.add_argument("--ncpu", type=int,
-        help="Number of cpu cores per thread to use", default=0)
-    parser.add_argument("--wavemin", type=float,
-        help="Minimum wavelength to simulate")
-    parser.add_argument("--wavemax", type=float,
-        help="Maximum wavelength to simulate")
-    parser.add_argument("--nspec", type=int,
-        help="Number of spectra to simulate per camera",
-                        default=0)
+    parser.add_argument("--ncpu", type=int, help="Number of cpu cores per thread to use", default=0)
+    parser.add_argument("--wavemin", type=float, help="Minimum wavelength to simulate")
+    parser.add_argument("--wavemax", type=float, help="Maximum wavelength to simulate")
+    parser.add_argument("--nspec", type=int, help="Number of spectra to simulate per camera", default=0)
 
-    parser.add_argument("--mpi_camera", type=int, default=1, help="Number of "
-        "MPI processes to use per camera")
+    parser.add_argument("--mpi_camera", type=int, default=1, help="Number of MPI processes to use per camera")
 
     if options is None:
         args = parser.parse_args()
@@ -195,7 +179,7 @@ def main(args, comm=None):
     if rank == 0:
         log.info('Starting pixsim at {}'.format(asctime()))
 
-    #- Pre-flight check that these cameras haven't been done yet
+    # - Pre-flight check that these cameras haven't been done yet
     if (rank == 0) and (not args.overwrite) and os.path.exists(args.rawfile):
         log.debug('Checking if cameras are already in output file')
         from astropy.io import fits
@@ -203,8 +187,7 @@ def main(args, comm=None):
         oops = False
         for camera in args.cameras:
             if camera.upper() in fx:
-                log.error('Camera {} already in {}'.format(camera,
-                    args.rawfile))
+                log.error('Camera {} already in {}'.format(camera, args.rawfile))
                 oops = True
         fx.close()
         if oops:
@@ -229,20 +212,17 @@ def main(args, comm=None):
             comm_group = comm.Split(color=group, key=group_rank)
             comm_rank = comm.Split(color=group_rank, key=group)
         else:
-            from mpi4py import MPI
             group = comm.rank
             ngroup = comm.size
             comm_group = MPI.COMM_SELF
             comm_rank = comm
 
-    group_cameras = np.array_split(np.arange(ncamera, dtype=np.int32),
-        ngroup)[group]
+    group_cameras = np.array_split(np.arange(ncamera, dtype=np.int32), ngroup)[group]
 
     # Compute which spectrographs our group needs to store based on which
     # cameras we are processing.
 
-    group_spectro = np.unique(np.array([ int(args.cameras[c][1]) for c in \
-        group_cameras ], dtype=np.int32))
+    group_spectro = np.unique(np.array([int(args.cameras[c][1]) for c in group_cameras], dtype=np.int32))
 
     # Remove outputs and or temp files
 
@@ -276,8 +256,7 @@ def main(args, comm=None):
 
     simspec = None
     if comm is not None:
-        simspec = io.read_simspec_mpi(args.simspec, comm,
-            spectrographs=group_spectro)
+        simspec = io.read_simspec_mpi(args.simspec, comm, spectrographs=group_spectro)
     else:
         simspec = io.read_simspec(args.simspec)
 
@@ -298,20 +277,19 @@ def main(args, comm=None):
                 fibers = np.array(fibermap['FIBER'], dtype=np.int32)
             else:
                 # Get the number of fibers from one of the photon HDUs
-                fibers = np.arange(fx['PHOT_B'].header['NAXIS2'],
-                    dtype=np.int32)
+                fibers = np.arange(fx['PHOT_B'].header['NAXIS2'], dtype=np.int32)
             fx.close()
-        if args.nspec>0 :
+        if args.nspec > 0:
             fibers = fibers[0:args.nspec]
     if comm is not None:
         fibers = comm.bcast(fibers, root=0)
 
-    fs = np.in1d(fibers//500, group_spectro)
+    fs = np.in1d(fibers // 500, group_spectro)
     group_fibers = fibers[fs]
 
     # Use original seed to generate different random seeds for each camera
     np.random.seed(args.seed)
-    seeds = np.random.randint(0, 2**32-1, size=ncamera)
+    seeds = np.random.randint(0, 2**32 - 1, size=ncamera)
 
     image = {}
     rawpix = {}
@@ -348,20 +326,18 @@ def main(args, comm=None):
         if args.cosmics:
             if group_rank == 0:
                 if args.cosmics_file is None:
-                    cosmics_file = io.find_cosmics(camera,
-                        simspec.header['EXPTIME'],
-                        cosmics_dir=args.cosmics_dir)
+                    cosmics_file = io.find_cosmics(camera, simspec.header['EXPTIME'],
+                                                   cosmics_dir=args.cosmics_dir)
                     log.info('cosmics templates {}'.format(cosmics_file))
                 else:
                     cosmics_file = args.cosmics_file
 
                 shape = (psf.npix_y, psf.npix_x)
-                cosmics = io.read_cosmics(cosmics_file, cosexpid,
-                    shape=shape)
+                cosmics = io.read_cosmics(cosmics_file, cosexpid, shape=shape)
             if comm_group is not None:
                 cosmics = comm_group.bcast(cosmics, root=0)
 
-        #- Do the actual simulation
+        # - Do the actual simulation
         # Each process in the group is responsible for a subset of the
         # fibers.
 
@@ -370,13 +346,13 @@ def main(args, comm=None):
             if comm_group is not None:
                 group_size = comm_group.size
             log.info("Group {} ({} processes) simulating camera "
-                "{}".format(group, group_size, camera))
+                     "{}".format(group, group_size, camera))
 
         image[camera], rawpix[camera], truepix[camera] = \
             simulate(camera, simspec, psf, fibers=group_fibers,
-                ncpu=args.ncpu, nspec=args.nspec, cosmics=cosmics,
-                wavemin=args.wavemin, wavemax=args.wavemax, preproc=False,
-                comm=comm_group)
+                     ncpu=args.ncpu, nspec=args.nspec, cosmics=cosmics,
+                     wavemin=args.wavemin, wavemax=args.wavemax, preproc=False,
+                     comm=comm_group)
 
         if args.psf is None:
             del psf
@@ -401,13 +377,12 @@ def main(args, comm=None):
         if c in group_cameras:
             if group_rank == 0:
                 lvmspec.io.write_raw(rawtemp, rawpix[camera],
-                    camera=camera, header=image[camera].meta,
-                    primary_header=simspec.header)
+                                     camera=camera, header=image[camera].meta,
+                                     primary_header=simspec.header)
                 log.info('Wrote {} image to {}'.format(camera, args.rawfile))
                 io.write_simpix(simpixtemp, truepix[camera],
-                    camera=camera, meta=simspec.header)
-                log.info('Wrote {} image to {}'.format(camera,
-                    args.simpixfile))
+                                camera=camera, meta=simspec.header)
+                log.info('Wrote {} image to {}'.format(camera, args.simpixfile))
         if comm is not None:
             comm.barrier()
 
@@ -422,15 +397,14 @@ def main(args, comm=None):
     if args.preproc:
         if rank == 0:
             log.info('Preprocessing raw -> pix files')
-        from lvmspec.scripts import preproc
         if len(group_cameras) > 0:
             if group_rank == 0:
                 for c in group_cameras:
                     camera = args.cameras[c]
                     pixfile = lvmspec.io.findfile('pix', night=args.night,
-                        expid=args.expid, camera=camera)
+                                                  expid=args.expid, camera=camera)
                     preproc_opts = ['--infile', args.rawfile, '--outdir',
-                        args.preproc_dir, '--pixfile', pixfile]
+                                    args.preproc_dir, '--pixfile', pixfile]
                     preproc_opts += ['--cameras', camera]
                     preproc.main(preproc.parse(preproc_opts))
 

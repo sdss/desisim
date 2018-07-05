@@ -4,7 +4,7 @@ import unittest
 from astropy.table import Table, Column
 from astropy.io import fits
 from lvmsim.quickcat import quickcat
-from desitarget import desi_mask, bgs_mask, mws_mask
+from lvmtarget import desi_mask, bgs_mask, mws_mask
 import lvmmodel.io
 
 class TestQuickCat(unittest.TestCase):

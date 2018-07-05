@@ -12,7 +12,7 @@ import astropy.time
 from astropy.io import fits
 import fitsio
 
-import desitarget
+import lvmtarget
 import lvmspec.io
 import lvmspec.io.util
 import lvmmodel.io
@@ -288,7 +288,7 @@ def fibermeta2fibermap(fiberassign, meta):
     A future refactor will standardize the column names of fiber assignment,
     target catalogs, and fibermaps, but in the meantime this is needed.
     '''
-    from desitarget import desi_mask
+    from lvmtarget import desi_mask
 
     #- Copy column names in common
     fibermap = lvmspec.io.empty_fibermap(len(fiberassign))
@@ -340,7 +340,7 @@ def fibermeta2fibermap(fiberassign, meta):
 #- specsim related routines
 
 def simulate_spectra(wave, flux, fibermap=None, obsconditions=None,
-    dwave_out=None, seed=None):
+    dwave_out=None, seed=None, config_name=None, params=None):
     '''
     Simulates an exposure without reading/writing data files
 
@@ -381,12 +381,12 @@ def simulate_spectra(wave, flux, fibermap=None, obsconditions=None,
         wave = wave * u.Angstrom
 
     log.debug('loading specsim desi config')
-    config = _specsim_config_for_wave(wave.to('Angstrom').value, dwave_out=dwave_out)
+    config = _specsim_config_for_wave(wave.to('Angstrom').value, dwave_out=dwave_out, config_name=config_name)
 
     #- Create simulator
-    log.debug('creating specsim desi simulator')
-    # desi = specsim.simulator.Simulator(config, num_fibers=nspec)
-    desi = lvmsim.specsim.get_simulator(config, num_fibers=nspec)
+    log.debug('creating specsim lvm simulator')
+
+    desi = lvmsim.specsim.get_simulator(config, num_fibers=nspec, params=params)
 
     if obsconditions is None:
         log.warning('Assuming DARK conditions')
@@ -476,7 +476,7 @@ def simulate_spectra(wave, flux, fibermap=None, obsconditions=None,
 
         # BGS parameters based on SDSS main sample, in g-band
         # see analysis from J. Moustakas in
-        # https://github.com/desihub/desitarget/blob/bgs-properties/doc/nb/bgs-morphology-properties.ipynb
+        # https://github.com/desihub/lvmtarget/blob/bgs-properties/doc/nb/bgs-morphology-properties.ipynb
         # B/T (bulge-to-total ratio): 0.48 (0.36 - 0.59).
         # Bulge Sersic n: 2.27 (1.12 - 3.60).
         # log10 (Bulge Half-light radius): 0.11 (-0.077 - 0.307) arcsec
@@ -541,7 +541,7 @@ def simulate_spectra(wave, flux, fibermap=None, obsconditions=None,
 
     return desi
 
-def _specsim_config_for_wave(wave, dwave_out=None):
+def _specsim_config_for_wave(wave, dwave_out=None, config_name='desi'):
     '''
     Generate specsim config object for a given wavelength grid
 
@@ -557,7 +557,7 @@ def _specsim_config_for_wave(wave, dwave_out=None):
     dwave = round(np.mean(np.diff(wave)), 3)
     assert np.allclose(dwave, np.diff(wave), rtol=1e-6, atol=1e-3)
 
-    config = specsim.config.load_config('desi')
+    config = specsim.config.load_config(config_name)
     config.wavelength_grid.min = wave[0]
     config.wavelength_grid.max = wave[-1] + dwave/2.0
     config.wavelength_grid.step = dwave
@@ -598,7 +598,7 @@ def get_source_types(fibermap):
     source_type = np.zeros(len(fibermap), dtype='U4')
     assert np.all(source_type == '')
 
-    tm = desitarget.desi_mask
+    tm = lvmtarget.desi_mask
     if 'TARGETID' in fibermap.dtype.names:
         unassigned = fibermap['TARGETID'] == -1
         source_type[unassigned] = 'sky'
@@ -676,7 +676,7 @@ def testslit_fibermap():
     return fibermap
 
 #-------------------------------------------------------------------------
-#- MOVE THESE TO desitarget.mocks.io (?)
+#- MOVE THESE TO lvmtarget.mocks.io (?)
 #-------------------------------------------------------------------------
 
 def get_mock_spectra(fiberassign, mockdir=None):
@@ -691,7 +691,7 @@ def get_mock_spectra(fiberassign, mockdir=None):
     meta = None
     wave = None
 
-    issky = (fiberassign['LVM_TARGET'] & desitarget.desi_mask.SKY) != 0
+    issky = (fiberassign['LVM_TARGET'] & lvmtarget.desi_mask.SKY) != 0
     skyids = fiberassign['TARGETID'][issky]
 
     for truthfile, targetids in zip(*targets2truthfiles(fiberassign, basedir=mockdir)):
@@ -807,7 +807,7 @@ def targets2truthfiles(targets, basedir, nside=64):
         are in truthfiles[i]
     '''
     import healpy
-    import desitarget.mock.io as mockio
+    import lvmtarget.mock.io as mockio
     assert nside >= 2
 
     #- TODO: what should be done with assignments without targets?
