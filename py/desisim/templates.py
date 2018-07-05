@@ -10,6 +10,7 @@ from __future__ import division, print_function
 import os
 import sys
 import numpy as np
+import multiprocessing
 
 from desisim.io import empty_metatable
 
@@ -61,7 +62,7 @@ class EMSpectrum(object):
         # Build a wavelength array if one is not given.
         if log10wave is None:
             cdelt = cdelt_kms/LIGHT/np.log(10) # pixel size [log-10 A]
-            npix = (np.log10(maxwave)-np.log10(minwave))/cdelt+1
+            npix = int(round((np.log10(maxwave)-np.log10(minwave))/cdelt))+1
             self.log10wave = np.linspace(np.log10(minwave), np.log10(maxwave), npix)
         else:
             self.log10wave = log10wave
@@ -314,7 +315,7 @@ class GALAXY(object):
         # Initialize the output wavelength array (linear spacing) unless it is
         # already provided.
         if wave is None:
-            npix = (maxwave-minwave) / cdelt+1
+            npix = int(round((maxwave-minwave) / cdelt))+1
             wave = np.linspace(minwave, maxwave, npix)
         self.wave = wave
 
@@ -1063,7 +1064,7 @@ class SUPERSTAR(object):
         # Initialize the output wavelength array (linear spacing) unless it is
         # already provided.
         if wave is None:
-            npix = (maxwave-minwave) / cdelt+1
+            npix = int(round((maxwave-minwave) / cdelt))+1
             wave = np.linspace(minwave, maxwave, npix)
         self.wave = wave
 
@@ -1602,7 +1603,8 @@ class QSO():
     """Generate Monte Carlo spectra of quasars (QSOs)."""
 
     def __init__(self, minwave=3600.0, maxwave=10000.0, cdelt=0.2, wave=None,
-                 normfilter='decam2014-r', colorcuts_function=None, z_wind=0.2):
+                 normfilter='decam2014-r', colorcuts_function=None,
+                 balqso=False, z_wind=0.2):
         """Read the QSO basis continuum templates, filter profiles and initialize the
            output wavelength array.
 
@@ -1620,10 +1622,12 @@ class QSO():
             [default 2 Angstrom/pixel].
           wave (numpy.ndarray): Input/output observed-frame wavelength array,
             overriding the minwave, maxwave, and cdelt arguments [Angstrom].
-          colorcuts_function (function name): Function to use to select
-            templates that pass the color-cuts.
           normfilter (str): normalize each spectrum to the magnitude in this
             filter bandpass (default 'decam2014-r').
+          colorcuts_function (function name): Function to use to select
+            templates that pass the color-cuts.
+          balqso (bool, optional): Include broad absorption line (BAL) features
+            (default False).
           z_wind (float, optional): Redshift window for sampling (defaults to
             0.2).
 
@@ -1640,7 +1644,7 @@ class QSO():
         from astropy.io import fits
         from astropy import cosmology
         from speclite import filters
-        from desisim.io import find_basis_template
+        from desisim.io import find_basis_template, read_basis_templates
         from desiutil.log import get_logger
         from desisim import lya_mock_p1d as lyamock
 
@@ -1661,7 +1665,7 @@ class QSO():
         # Initialize the output wavelength array (linear spacing) unless it is
         # already provided.
         if wave is None:
-            npix = (maxwave-minwave) / cdelt+1
+            npix = int(round((maxwave-minwave) / cdelt))+1
             wave = np.linspace(minwave, maxwave, npix)
         self.wave = wave
 
@@ -1688,23 +1692,35 @@ class QSO():
         # Iniatilize the Lyman-alpha mock maker.
         self.lyamock_maker = lyamock.MockMaker()
 
+        # Optionally read the BAL basis templates and resample.
+        self.balqso = balqso
+        if self.balqso:
+            from desispec.interpolation import resample_flux
+            bal_baseflux1, bal_basewave, bal_basemeta = read_basis_templates(objtype='BAL')
+            bal_baseflux = np.zeros((len(bal_basemeta), len(self.eigenwave)))
+            for ii in range(len(bal_basemeta)):
+                bal_baseflux[ii, :] = resample_flux(self.eigenwave, bal_basewave,
+                                                    bal_baseflux1[ii, :], extrapolate=True)
+                bal_baseflux[ii, bal_baseflux[ii, :] > 1] = 1.0 # do not exceed unity
+            self.bal_baseflux = bal_baseflux
+            self.bal_basemeta = bal_basemeta
+
         # Initialize the filter profiles.
         self.normfilt = filters.load_filters(self.normfilter)
         self.decamwise = filters.load_filters('decam2014-g', 'decam2014-r', 'decam2014-z',
                                               'wise2010-W1', 'wise2010-W2')
 
-    def _sample_pcacoeff(self, nsample, coeff, rand):
+    def _sample_pcacoeff(self, nsample, coeff, samplerand):
         """Draw from the distribution of PCA coefficients."""
         cdf = np.cumsum(coeff, dtype=float)
         cdf /= cdf[-1]
-        x = rand.uniform(0.0, 1.0, size=nsample)
-        
+        x = samplerand.uniform(0.0, 1.0, size=nsample)
         return coeff[np.interp(x, cdf, np.arange(0, len(coeff), 1)).astype('int')]
 
     def make_templates(self, nmodel=100, zrange=(0.5, 4.0), rmagrange=(20.0, 22.5),
                        seed=None, redshift=None, mag=None, input_meta=None, N_perz=40, 
-                       maxiter=20, uniform=False, lyaforest=True, nocolorcuts=False,
-                       verbose=False):
+                       maxiter=20, uniform=False, balprob=0.12, lyaforest=True,
+                       nocolorcuts=False, verbose=False):
         """Build Monte Carlo QSO spectra/templates.
 
         This function generates QSO spectra on-the-fly using PCA decomposition
@@ -1727,8 +1743,8 @@ class QSO():
           zrange (float, optional): Minimum and maximum redshift range.  Defaults
             to a uniform distribution between (0.5, 4.0).
           rmagrange (float, optional): Minimum and maximum DECam r-band (AB)
-            magnitude range.  Defaults to a uniform distribution between (21,
-            23.0).
+            magnitude range.  Defaults to a uniform distribution between (20,
+            22.5).
           seed (int, optional): input seed for the random numbers.
           redshift (float, optional): Input/output template redshifts.  Array
             size must equal nmodel.  Ignores zrange input.
@@ -1747,6 +1763,8 @@ class QSO():
             template that also satisfies the color-cuts (default 20).
           uniform (bool, optional): Draw uniformly from the PCA coefficients
             (default False).
+          balprob (float, optional): Probability that a QSO is a BAL (default
+            0.12).  Only used if QSO(balqso=True) at instantiation.
           lyaforest (bool, optional): Include Lyman-alpha forest absorption
             (default True).
           nocolorcuts (bool, optional): Do not apply the fiducial rzW1W2 color-cuts
@@ -1785,6 +1803,14 @@ class QSO():
             if len(mag) != nmodel:
                 log.fatal('Mag must be an nmodel-length array')
                 raise ValueError
+
+        if self.balqso:
+            if balprob < 0:
+                log.warning('Balprob {} is negative; setting to zero.'.format(balprob))
+                balprob = 0.0
+            if balprob > 1:
+                log.warning('Balprob {} cannot exceed unity; setting to 1.0.'.format(balprob))
+                balprob = 1.0
 
         npix = len(self.eigenwave)
 
@@ -1826,8 +1852,15 @@ class QSO():
         for key, value in zip(('REDSHIFT', 'MAG', 'SEED'),
                                (redshift, mag, templateseed)):
             meta[key] = value
-        if lyaforest:
+
+        if lyaforest: 
             meta['SUBTYPE'] = 'LYA'
+            
+        if self.balqso:
+            if lyaforest: 
+                meta['SUBTYPE'] = 'LYA+BAL'
+            else:
+                meta['SUBTYPE'] = 'BAL'
 
         # Attenuate below the Lyman-limit by the mean free path (MFP) model
         # measured by Worseck, Prochaska et al. 2014.
@@ -1848,6 +1881,12 @@ class QSO():
                 log.debug('Simulating {} template {}/{}.'.format(self.objtype, ii, nmodel))
 
             templaterand = np.random.RandomState(templateseed[ii])
+
+            # Does this QSO have a BAL?  If so, build the spectrum here.
+            hasbal = self.balqso * (templaterand.random_sample() < balprob)
+            if hasbal:
+                balindx = templaterand.choice(len(self.bal_basemeta))
+                balflux = self.bal_baseflux[balindx, :]
 
             # BOSS or SDSS?
             if redshift[ii] > 2.15:
@@ -1881,7 +1920,6 @@ class QSO():
             # Iterate up to maxiter.
             makemore, itercount = True, 0
             while makemore:
-
                 # Gather N_perz sets of coefficients.
                 for jj, ipca in enumerate(self.pca_list):
                     if uniform:
@@ -1901,10 +1939,14 @@ class QSO():
                     flux[kk, :] = np.dot(self.eigenflux.T, PCA_rand[:, kk]).flatten()
                     if redshift[ii] > 2.39:
                          flux[kk, :pix912] *= np.exp(-phys_dist.value / mfp[ii])
-                    if lyaforest:
-                        flux[kk, :] *= qso_skewer_flux
-                    nonegflux[kk] = (np.sum(flux[kk, (zwave[:, ii] > 3000) & (zwave[:, ii] < 1E4)] < 0) == 0) * 1
 
+                    if lyaforest:
+                        flux[kk, :] *= qso_skewer_flux                    
+                    if hasbal:
+                        flux[kk, :] *= balflux
+
+                    nonegflux[kk] = (np.sum(flux[kk, (zwave[:, ii] > 3000) & (zwave[:, ii] < 1E4)] < 0) == 0) * 1
+                        
                 # Synthesize photometry to determine which models will pass the
                 # color-cuts.  We have to temporarily pad because the spectra
                 # don't go red enough.
@@ -1965,7 +2007,9 @@ class SIMQSO():
     """Generate Monte Carlo spectra of quasars (QSOs) using simqso."""
 
     def __init__(self, minwave=3600.0, maxwave=10000.0, cdelt=0.2, wave=None,
-                 nproc=1, normfilter='decam2014-r', colorcuts_function=None):
+                 nproc=1, basewave_min=450.0, basewave_max=6e4, basewave_R=8000,
+                 normfilter='decam2014-r', colorcuts_function=None,
+                 restframe=False):
         """Read the QSO basis continuum templates, filter profiles and initialize the
            output wavelength array.
 
@@ -1985,8 +2029,19 @@ class SIMQSO():
             [default 2 Angstrom/pixel].
           wave (numpy.ndarray): Input/output observed-frame wavelength array,
             overriding the minwave, maxwave, and cdelt arguments [Angstrom].
+          nproc (int, optional): number of cores to use (default 1).
+          basewave_min (float, optional): minimum output wavelength when either
+            restframe=True or noresample=True (in SIMQSO.make_templates)
+            [default 450 Angstrom].
+          basewave_max (float, optional): maximum output wavelength when either
+            restframe=True or noresample=True (in SIMQSO.make_templates)
+            [default 60000 Angstrom].
+          basewave_R (float, optional): output wavelength resolution when either
+            restframe=True or noresample=True (in SIMQSO.make_templates)
+            [default R=8000].
           colorcuts_function (function name): Function to use to select
             templates that pass the color-cuts.
+          restframe (bool, optional): If True, generate rest-frame templates.
           normfilter (str): normalize each spectrum to the magnitude in this
             filter bandpass (default 'decam2014-r').
 
@@ -2039,11 +2094,19 @@ class SIMQSO():
         # Initialize the output wavelength array (linear spacing) unless it is
         # already provided.
         if wave is None:
-            npix = (maxwave-minwave) / cdelt+1
+            npix = int(round((maxwave-minwave) / cdelt))+1
             wave = np.linspace(minwave, maxwave, npix)
         self.wave = wave
 
-        self.basewave = fixed_R_dispersion(900.0, 6e4, 8000)
+        self.restframe = restframe
+        if restframe:
+            self._zpivot = 3.0
+            self.basewave = fixed_R_dispersion(basewave_min*(1+self._zpivot),
+                                               basewave_max*(1+self._zpivot),
+                                               basewave_R)
+        else:
+            self.basewave = fixed_R_dispersion(basewave_min, basewave_max, basewave_R)
+            
         self.cosmo = cosmology.core.FlatLambdaCDM(70.0, 0.3)
 
         self.lambda_lylimit = 911.76
@@ -2086,7 +2149,7 @@ class SIMQSO():
 
         return qsometa
 
-    def _make_simqso_templates(self, redshift=None, rmagrange=None, seed=None,
+    def _make_simqso_templates(self, redshift=None, rmagrange=None, seed=None,                               
                                lyaforest=True, nocolorcuts=False, noresample=False,
                                input_qsometa=None):
         """Wrapper function for actually generating the templates.
@@ -2105,7 +2168,7 @@ class SIMQSO():
             nmodel = len(redshift)
             
         meta = empty_metatable(nmodel=nmodel, objtype='QSO', subtype=subtype)
-        if noresample:
+        if noresample or self.restframe:
             outflux = np.zeros([nmodel, len(self.basewave)])
         else:
             outflux = np.zeros([nmodel, len(self.wave)])
@@ -2177,7 +2240,7 @@ class SIMQSO():
         these = np.where(colormask)[0]
         if len(these) > 0:
             for ii in range(len(these)):
-                if noresample:
+                if noresample or self.restframe:
                     outflux[these[ii], :] = flux[these[ii], :]
                 else:
                     outflux[these[ii], :] = resample_flux(
@@ -2189,8 +2252,11 @@ class SIMQSO():
                 meta['REDSHIFT'][these] = input_qsometa.z
             else:
                 meta['SEED'][these] = seed
-                meta['REDSHIFT'][these] = redshift[these]
-                
+                if self.restframe:
+                    meta['REDSHIFT'][these] = 0
+                else:
+                    meta['REDSHIFT'][these] = redshift[these]
+                    
             meta['MAG'][these] = -2.5 * np.log10(normmaggies[these])
             for band, filt in zip( ('FLUX_G', 'FLUX_R', 'FLUX_Z', 'FLUX_W1', 'FLUX_W2'),
                                    ('decam2014-g', 'decam2014-r', 'decam2014-z',
@@ -2278,10 +2344,18 @@ class SIMQSO():
         else:
             log = get_logger()
 
+        if self.restframe:
+            log.debug('Setting nocolorcuts=True.')
+            nocolorcuts = True
+
         # Optionally generate spectra from an input file or a
         # simqso.sqgrids.QsoSimPoints object.
         if input_qsometa:
             from simqso.sqgrids import QsoSimObjects
+
+            if self.restframe:
+                log.warning('restframe and input_qsometa inputs cannot be used together.')
+                raise ValueError
             
             if isinstance(input_qsometa, QsoSimObjects):
                 qsos = input_qsometa
@@ -2298,6 +2372,10 @@ class SIMQSO():
                 len(qsometa.data)))
 
         else:
+            if self.restframe and noresample:
+                log.warning('restframe and noresample inputs cannot be used together.')
+                raise ValueError
+
             # Initialize the random seed and assign redshift priors.
             rand = np.random.RandomState(seed)
 
@@ -2310,10 +2388,13 @@ class SIMQSO():
             meta = empty_metatable(nmodel=nmodel, objtype='QSO')
             qsometa = None
 
-            if noresample:
+            if noresample or self.restframe:
                 outflux = np.zeros([nmodel, len(self.basewave)])
             else:
                 outflux = np.zeros([nmodel, len(self.wave)])
+
+            if self.restframe:
+                redshift = np.repeat(self._zpivot, nmodel)
 
             # Iterate (up to maxiter) until enough spectra pass the color cuts.
             itercount = 0
@@ -2325,16 +2406,14 @@ class SIMQSO():
             need = _need(outflux)
             
             while (len(need) > 0):
-
                 if redshift is None:
                     zin = rand.uniform(zrange[0], zrange[1], len(need))
                 else:
                     zin = redshift[need]
 
                 iterflux, itermeta, iterqsometa = self._make_simqso_templates(
-                    zin, rmagrange, seed=iterseed[itercount],
-                    lyaforest=lyaforest, nocolorcuts=nocolorcuts,
-                    noresample=noresample)
+                    zin, rmagrange, seed=iterseed[itercount], lyaforest=lyaforest,
+                    nocolorcuts=nocolorcuts, noresample=noresample)
 
                 outflux[need, :] = iterflux
                 meta[need] = itermeta
@@ -2364,6 +2443,8 @@ class SIMQSO():
 
         if noresample:
             outwave = self.basewave
+        elif self.restframe:
+            outwave = self.basewave / (1 + self._zpivot)
         else:
             outwave = self.wave
 

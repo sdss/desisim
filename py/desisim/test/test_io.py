@@ -49,8 +49,11 @@ class TestIO(unittest.TestCase):
         x = io.simdir()
         self.assertTrue(x is not None)
         night = '20150101'
-        x = io.simdir(night)
-        self.assertTrue(x.endswith(night))
+        expid = 123
+        x = io.simdir(night, expid)
+        self.assertTrue(x.endswith(str(expid)))
+        x = io.simdir(int(night), expid)
+        self.assertTrue(x.endswith(str(expid)))
         x = io.simdir(night, mkdir=True)
         self.assertTrue(os.path.exists(x))
 
@@ -60,13 +63,9 @@ class TestIO(unittest.TestCase):
         camera = 'z3'
         filepath = io.findfile('simspec', night, expid)
         filepath = io.findfile('simpix', night, expid, camera)
-        filepath = io.findfile('pix', night, expid, camera)
         outdir = '/blat/foo/bar'
         filepath = io.findfile('simpix', night, expid, camera, outdir=outdir, mkdir=False)
         self.assertTrue(filepath.startswith(outdir))
-
-        with self.assertRaises(ValueError):
-            io.findfile('pix', night, expid)  #- missing camera
 
         with self.assertRaises(ValueError):
             io.findfile('blat', night, expid, camera)  #- bad filetype
@@ -141,13 +140,13 @@ class TestIO(unittest.TestCase):
         self.assertEqual(prefix, 'simspec')
         self.assertEqual(camera, None)
         self.assertEqual(expid, 2)
-        prefix, camera, expid = io._parse_filename('/blat/foo/pix-r2-00000003.fits')
-        self.assertEqual(prefix, 'pix')
+        prefix, camera, expid = io._parse_filename('/blat/foo/preproc-r2-00000003.fits')
+        self.assertEqual(prefix, 'preproc')
         self.assertEqual(camera, 'r2')
         self.assertEqual(expid, 3)
 
     #- TODO
-    #- simspec_io
+    #- simspec_io (ok - covered by desisim.test.test_pixsim)
     #- read_cosmics
 
 
@@ -155,3 +154,10 @@ class TestIO(unittest.TestCase):
 #- This runs all test* functions in any TestCase class in this file
 if __name__ == '__main__':
     unittest.main()
+
+def test_suite():
+    """Allows testing of only this module with the command::
+
+        python setup.py test -m desisim.test.test_io
+    """
+    return unittest.defaultTestLoader.loadTestsFromName(__name__)
