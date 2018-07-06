@@ -105,6 +105,9 @@ def parse(options=None):
     parser.add_argument('--nstart', type=int, default=0,help='starting spectra # for simulation 0-4999')
     parser.add_argument('--spectrograph',type=int, default=None,help='Spectrograph no. 0-9')
     parser.add_argument('--config', type=str, default='desi', help='specsim configuration')
+    parser.add_argument('-b', '--n_fibers', type=int, default=650, help='total number of fibers')
+    parser.add_argument('-t', '--telescope', type=str, default='1m', help='telescope', choices=['1m', '160mm'])
+    parser.add_argument('-l', '--location', type=str, default='APO', help='site location', choices=['APO', 'LCO'])
     parser.add_argument('-s','--seed', type=int, default=0,  help="random seed")
     # Only produce uncalibrated output
     parser.add_argument('--frameonly', action="store_true", help="only output frame files")
@@ -115,7 +118,7 @@ def parse(options=None):
     parser.add_argument('--moon-zenith', type=float,  help='zenith angle of the moon (0-90 deg)', default=None, metavar='')
 
     parser.add_argument('--objtype', type=str,  help='ELG, LRG, QSO, BGS, MWS, WD, DARK_MIX, or BRIGHT_MIX', default='DARK_MIX', metavar='')
-    parser.add_argument('-a','--airmass', type=float,  help='airmass', default=None, metavar='') 
+    parser.add_argument('-a','--airmass', type=float,  help='airmass', default=None, metavar='')
     parser.add_argument('-e','--exptime', type=float,  help='exposure time (s)', default=None,metavar='')
     parser.add_argument('-o','--outdir', type=str,  help='output directory', default='.', metavar='')
     parser.add_argument('-v','--verbose', action='store_true', help='toggle on verbose output')
@@ -203,7 +206,7 @@ def main(args):
 
     # Derive spectrograph number from nstart if needed
     if args.spectrograph is None:
-        args.spectrograph = args.nstart / 500
+        args.spectrograph = args.nstart / args.n_fibers
 
     # Read fibermapfile to get object type, night and expid
     if args.fibermap:
@@ -227,8 +230,8 @@ def main(args):
         expid = 0
 
     log.info("Initializing SpecSim with config {}".format(args.config))
-    desiparams = load_desiparams()
-    qsim = get_simulator(args.config, num_fibers=1)
+    desiparams = load_desiparams(config=args.config, telescope=args.telescope)
+    qsim = get_simulator(args.config, num_fibers=1, params=desiparams)
 
     if args.simspec:
         # Read the input file
@@ -360,7 +363,13 @@ def main(args):
         qsim.atmosphere.airmass = simspec.header['AIRMASS']
     else:
         qsim.atmosphere.airmass =  1.25   # Science Req. Doc L3.3.2
-        
+
+    # Set site location
+    if args.location is not None:
+        qsim.observation.observatory = args.location
+    else:
+        qsim.observation.observatory = 'APO'
+
     # Set exptime
     if args.exptime is not None:
         qsim.observation.exposure_time = args.exptime * u.s
@@ -382,7 +391,7 @@ def main(args):
         qsim.atmosphere.moon.moon_phase = 0.1
     else:
         qsim.atmosphere.moon.moon_phase = 0.5
-        
+
     # Set Moon Zenith
     if args.moon_zenith is not None:
         qsim.atmosphere.moon.moon_zenith = args.moon_zenith * u.deg
@@ -474,11 +483,11 @@ def main(args):
                 ivar = np.tile(meanspec, [nspec, 1])
                 mask = np.zeros((simspec.nspec, num_pixels), dtype=np.uint32)
 
-                for kk in range((args.nspec+args.nstart-1)//500+1):
+                for kk in range((args.nspec+args.nstart-1)//args.n_fibers+1):
                     camera = channel+str(kk)
                     outfile = desispec.io.findfile('fiberflat', NIGHT, EXPID, camera)
-                    start=max(500*kk,args.nstart)
-                    end=min(500*(kk+1),nmax)
+                    start=max(args.n_fibers*kk,args.nstart)
+                    end=min(args.n_fibers*(kk+1),nmax)
 
                     if (args.spectrograph <= kk):
                         log.info("Writing files for channel:{}, spectrograph:{}, spectra:{} to {}".format(channel,kk,start,end))
@@ -567,10 +576,10 @@ def main(args):
         # Now write the outputs in DESI standard file system. None of the output file can have more than 500 spectra
 
         # Looping over spectrograph
-        for ii in range((args.nspec+args.nstart-1)//500+1):
+        for ii in range((args.nspec+args.nstart-1)//args.n_fibers+1):
 
-            start=max(500*ii,args.nstart) # first spectrum for a given spectrograph
-            end=min(500*(ii+1),nmax) # last spectrum for the spectrograph
+            start=max(args.n_fibers*ii,args.nstart) # first spectrum for a given spectrograph
+            end=min(args.n_fibers*(ii+1),nmax) # last spectrum for the spectrograph
 
             if (args.spectrograph <= ii):
                 camera = "{}{}".format(channel, ii)

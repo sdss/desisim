@@ -355,7 +355,7 @@ def fibermeta2fibermap(fiberassign, meta):
 
 def simulate_spectra(wave, flux, fibermap=None, obsconditions=None, redshift=None,
                      dwave_out=None, seed=None, psfconvolve=True,
-                     specsim_config_file = "desi"):
+                     specsim_config_file = "desi", params=None):
     '''
     Simulates an exposure without reading/writing data files
 
@@ -412,7 +412,7 @@ def simulate_spectra(wave, flux, fibermap=None, obsconditions=None, redshift=Non
     log.debug('creating specsim desi simulator')
     # desi = specsim.simulator.Simulator(config, num_fibers=nspec)
     desi = desisim.specsim.get_simulator(config, num_fibers=nspec,
-        camera_output=psfconvolve)
+        camera_output=psfconvolve, params=params)
 
     if obsconditions is None:
         log.warning('Assuming DARK conditions')

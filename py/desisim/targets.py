@@ -55,7 +55,7 @@ def get_simtype(spectype, desi_target, bgs_target, mws_target):
     isBGS |= isGalaxy & ((bgs_target & bgs_mask.BGS_FAINT) != 0)
 
     # this is introduced in the case of contaminants for mocks
-    # where spectype != desi_target. 
+    # where spectype != desi_target.
     # We assume that spectype=="Truth" and desi_target=="targeting information"
     isELG |= isGalaxy & ((desi_target & desi_mask.QSO) !=0 )
 
@@ -178,9 +178,9 @@ def sample_objtype(nobj, program):
 #- multiprocessing needs one arg, not multiple args
 def _wrap_get_targets(args):
     nspec, program, tileid, seed, specify_targets, specmin = args
-    return get_targets(nspec, program, tileid, seed=seed, specify_targets=specify_targets, specmin=specmin)
+    return get_targets(nspec, program, tileid, seed=seed, specify_targets=specify_targets, specmin=specmin, config=config, telescope=telescope)
 
-def get_targets_parallel(nspec, program, tileid=None, nproc=None, seed=None, specify_targets=dict()):
+def get_targets_parallel(nspec, program, tileid=None, nproc=None, seed=None, specify_targets=dict(), config=config, telescope=telescope):
     '''
     Parallel wrapper for get_targets()
 
@@ -193,7 +193,7 @@ def get_targets_parallel(nspec, program, tileid=None, nproc=None, seed=None, spe
     #- don't bother with parallelism if there aren't many targets
     if nspec < 20:
         log.debug('Not Parallelizing get_targets for only {} targets'.format(nspec))
-        return get_targets(nspec, program, tileid, seed=seed, specify_targets=specify_targets)
+        return get_targets(nspec, program, tileid, seed=seed, specify_targets=specify_targets, config=config, telescope=telescope)
     else:
         nproc = min(nproc, nspec//10)
         log.debug('Parallelizing get_targets using {} cores'.format(nproc))
@@ -204,9 +204,9 @@ def get_targets_parallel(nspec, program, tileid=None, nproc=None, seed=None, spe
         seeds = np.random.randint(2**32, size=nspec)
         for i in range(0, nspec, n):
             if i+n < nspec:
-                args.append( (n, program, tileid, seeds[i], specify_targets, i) )
+                args.append( (n, program, tileid, seeds[i], specify_targets, i, config, telescope) )
             else:
-                args.append( (nspec-i, program, tileid, seeds[i], specify_targets, i) )
+                args.append( (nspec-i, program, tileid, seeds[i], specify_targets, i, config, telescope) )
 
         pool = mp.Pool(nproc)
         results = pool.map(_wrap_get_targets, args)
@@ -232,7 +232,7 @@ def get_targets_parallel(nspec, program, tileid=None, nproc=None, seed=None, spe
 
         return fibermap, (flux, wave, meta)
 
-def get_targets(nspec, program, tileid=None, seed=None, specify_targets=dict(), specmin=0):
+def get_targets(nspec, program, tileid=None, seed=None, specify_targets=dict(), specmin=0, config=None, telescope=None):
     """
     Generates a set of targets for the requested program
 
@@ -245,7 +245,7 @@ def get_targets(nspec, program, tileid=None, seed=None, specify_targets=dict(), 
       * seed: (int) random number seed
       * specify_targets: (dict of dicts)  Define target properties like magnitude and redshift
                                  for each target class. Each objtype has its own key,value pair
-                                 see simspec.templates.specify_galparams_dict() 
+                                 see simspec.templates.specify_galparams_dict()
                                  or simsepc.templates.specify_starparams_dict()
       * specmin: (int) first spectrum number (0-indexed)
 
@@ -267,7 +267,7 @@ def get_targets(nspec, program, tileid=None, seed=None, specify_targets=dict(), 
 
     #- Get DESI wavelength coverage
     try:
-        params = desimodel.io.load_desiparams()
+        params = desimodel.io.load_desiparams(config=config, telescope=telescope)
         wavemin = params['ccd']['b']['wavemin']
         wavemax = params['ccd']['z']['wavemax']
     except KeyError:
@@ -291,7 +291,7 @@ def get_targets(nspec, program, tileid=None, seed=None, specify_targets=dict(), 
             obj_kwargs = specify_targets[objtype]
         else:
             obj_kwargs = dict()
-                
+
         # Simulate spectra
         if objtype == 'SKY':
             fibermap['DESI_TARGET'][ii] = desi_mask.SKY

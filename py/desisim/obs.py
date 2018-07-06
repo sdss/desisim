@@ -32,7 +32,7 @@ def new_exposure(program, nspec=5000, night=None, expid=None, tileid=None,
                  nproc=None, seed=None, obsconditions=None,
                  specify_targets=dict(), testslit=False, exptime=None,
                  arc_lines_filename=None, flat_spectrum_filename=None,
-                 outdir=None):
+                 outdir=None, config='desi', telescope=None):
     """
     Create a new exposure and output input simulation files.
     Does not generate pixel-level simulations or noisy spectra.
@@ -55,6 +55,8 @@ def new_exposure(program, nspec=5000, night=None, expid=None, tileid=None,
         arc_lines_filename (str, optional): use alternate arc lines filename (used if program="arc")
         flat_spectrum_filename (str, optional): use alternate flat spectrum filename (used if program="flat")
         outdir (str, optional): output directory
+        config (str, optional): the yaml configuration to load
+        telescope (str, optional): the telescope used (i.e. 1m, 160mm)
 
     Returns:
         science: sim, fibermap, meta, obsconditions
@@ -161,7 +163,7 @@ def new_exposure(program, nspec=5000, night=None, expid=None, tileid=None,
 
     #- all other programs
     fibermap, (flux, wave, meta) = get_targets_parallel(nspec, program,
-        tileid=tileid, nproc=nproc, seed=seed, specify_targets=specify_targets)
+        tileid=tileid, nproc=nproc, seed=seed, specify_targets=specify_targets, config=config, telescope=telescope)
 
     if obsconditions is None:
         if program in ['dark', 'lrg', 'qso']:
@@ -183,8 +185,9 @@ def new_exposure(program, nspec=5000, night=None, expid=None, tileid=None,
     if exptime is not None:
         obsconditions['EXPTIME'] = exptime
 
+    desiparams = load_desiparams(config=config, telescope=telescope)
     sim = simulate_spectra(wave, flux, fibermap=fibermap,
-        obsconditions=obsconditions, psfconvolve=False)
+        obsconditions=obsconditions, psfconvolve=False, specsim_config_file=config, params=desiparams)
 
     #- Write fibermap
     telera, teledec = io.get_tile_radec(tileid)
