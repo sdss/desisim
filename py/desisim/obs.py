@@ -27,6 +27,7 @@ from .targets import get_targets_parallel
 from . import io
 import desisim.simexp
 from .simexp import simulate_spectra
+from desimodel.io import load_desiparams
 
 def new_exposure(program, nspec=5000, night=None, expid=None, tileid=None,
                  nproc=None, seed=None, obsconditions=None,

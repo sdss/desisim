@@ -68,7 +68,7 @@ def get_simulator(config='desi', num_fibers=1, camera_output=True, params=None):
         #- New config; create Simulator object
         import specsim.simulator
         qsim = specsim.simulator.Simulator(config, num_fibers,
-            camera_output=camera_output)
+            camera_output=camera_output, params=params)
 
         #- Cache defaults to reset back to original state later
         defaults = dict()
