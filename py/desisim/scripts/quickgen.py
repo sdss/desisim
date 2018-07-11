@@ -221,6 +221,7 @@ def main(args):
         objtype[bgsindx]='LRG'
         NIGHT=fibermap.meta['NIGHT']
         EXPID=fibermap.meta['EXPID']
+        TILEID=fibermap.meta['TILEID']
     else:
         # Create a blank fake fibermap
         fibermap = empty_fibermap(args.nspec)
@@ -624,7 +625,7 @@ def main(args):
                 cframe = Frame(waves[channel], cframeFlux, cframeIvar, \
                     resolution_data=resol, spectrograph=ii,
                     fibermap=fibermap[start:end],
-                    meta=dict(CAMERA=camera, FLAVOR=simspec.flavor) )
+                    meta=dict(CAMERA=camera, FLAVOR=simspec.flavor, NIGHT=NIGHT, EXPID=EXPID, TILEID=TILEID) )
                 desispec.io.frame.write_frame(cframeFileName,cframe)
 
                 cframefilePath=desispec.io.findfile("cframe",NIGHT,EXPID,camera)
