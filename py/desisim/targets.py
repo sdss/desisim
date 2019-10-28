@@ -14,10 +14,10 @@ import string
 import numpy as np
 import yaml
 
-from astropy.table import Table, Column, hstack
+import astropy.table
 
 from desimodel.focalplane import FocalPlane
-from desisim.io import empty_metatable, empty_star_properties
+from desisim.io import empty_metatable
 import desimodel.io
 from desiutil.log import get_logger
 log = get_logger()
@@ -46,8 +46,8 @@ def get_simtype(spectype, desi_target, bgs_target, mws_target):
 
     isGalaxy = (spectype == 'GALAXY')
     isQSO = (spectype == 'QSO')
-    isStar = (spectype == 'STAR')
-    isSky = (spectype == 'SKY')
+    isStar = (spectype == 'STAR') | (spectype == 'WD')
+    isSky = (spectype == 'SKY')  | (spectype == '0.0')
 
     isLRG = isGalaxy & ((desi_target & desi_mask.LRG) != 0)
     isELG = isGalaxy & ((desi_target & desi_mask.ELG) != 0)
@@ -68,6 +68,9 @@ def get_simtype(spectype, desi_target, bgs_target, mws_target):
 #    from pdb import set_trace as bp
 #    bp()
 #    print(len(simtype), np.count_nonzero(simtype=='???'), spectype, type(spectype))
+
+    if np.any(simtype == '???') :
+        print("cannot guess simtype of: spectype={}".format(np.unique(spectype[simtype== '???'])))
     assert np.all(simtype != '???')
     return simtype
 
@@ -216,9 +219,17 @@ def get_targets_parallel(nspec, program, tileid=None, nproc=None, seed=None, spe
         #- wave should be the same for all targets
         wave = targets[0][1]
 
-        #- vstack for arrays, hstack for tables
+        #- vstack for arrays, hstack for tables, python-fu for dictionaries
         flux = np.vstack([tx[0] for tx in targets])
         meta = np.hstack([tx[2] for tx in targets])
+        objmeta = dict()
+        for tx in targets:
+            if len(tx[3]) > 0: # can be empty, e.g., for QSOs
+                for key in tx[3].keys():
+                    if key in objmeta:
+                        objmeta[key] = astropy.table.vstack( (objmeta[key], tx[3][key]) )
+                    else:
+                        objmeta[key] = tx[3][key]
 
         #- Fix FIBER and SPECTROID entries in fibermap
         fibermap['FIBER'] = np.arange(nspec)
@@ -230,7 +241,7 @@ def get_targets_parallel(nspec, program, tileid=None, nproc=None, seed=None, spe
         assert len(meta) == nspec
         assert len(wave) == nwave
 
-        return fibermap, (flux, wave, meta)
+        return fibermap, (flux, wave, meta, objmeta)
 
 def get_targets(nspec, program, tileid=None, seed=None, specify_targets=dict(), specmin=0, config=None, telescope=None):
     """
@@ -278,9 +289,14 @@ def get_targets(nspec, program, tileid=None, seed=None, specify_targets=dict(), 
     nwave = len(wave)
 
     flux = np.zeros( (nspec, len(wave)) )
-    meta = empty_metatable(nmodel=nspec, objtype='SKY')
+    meta, _ = empty_metatable(nmodel=nspec, objtype='SKY')
+    objmeta = dict()
     fibermap = empty_fibermap(nspec)
 
+    targetid = np.random.randint(sys.maxsize, size=nspec).astype(np.int64)
+    meta['TARGETID'] = targetid
+    fibermap['TARGETID'] = targetid
+    
     for objtype in set(true_objtype):
         ii = np.where(true_objtype == objtype)[0]
         nobj = len(ii)
@@ -300,26 +316,26 @@ def get_targets(nspec, program, tileid=None, seed=None, specify_targets=dict(), 
         elif objtype == 'ELG':
             from desisim.templates import ELG
             elg = ELG(wave=wave)
-            simflux, wave1, meta1 = elg.make_templates(nmodel=nobj, seed=seed, **obj_kwargs)
+            simflux, wave1, meta1, objmeta1 = elg.make_templates(nmodel=nobj, seed=seed, **obj_kwargs)
             fibermap['DESI_TARGET'][ii] = desi_mask.ELG
 
         elif objtype == 'LRG':
             from desisim.templates import LRG
             lrg = LRG(wave=wave)
-            simflux, wave1, meta1 = lrg.make_templates(nmodel=nobj, seed=seed, **obj_kwargs)
+            simflux, wave1, meta1, objmeta1 = lrg.make_templates(nmodel=nobj, seed=seed, **obj_kwargs)
             fibermap['DESI_TARGET'][ii] = desi_mask.LRG
 
         elif objtype == 'BGS':
             from desisim.templates import BGS
             bgs = BGS(wave=wave)
-            simflux, wave1, meta1 = bgs.make_templates(nmodel=nobj, seed=seed, **obj_kwargs)
+            simflux, wave1, meta1, objmeta1 = bgs.make_templates(nmodel=nobj, seed=seed, **obj_kwargs)
             fibermap['DESI_TARGET'][ii] = desi_mask.BGS_ANY
             fibermap['BGS_TARGET'][ii] = bgs_mask.BGS_BRIGHT
 
         elif objtype == 'QSO':
             from desisim.templates import QSO
             qso = QSO(wave=wave)
-            simflux, wave1, meta1 = qso.make_templates(nmodel=nobj, seed=seed, lyaforest=False, **obj_kwargs)
+            simflux, wave1, meta1, objmeta1 = qso.make_templates(nmodel=nobj, seed=seed, lyaforest=False, **obj_kwargs)
             fibermap['DESI_TARGET'][ii] = desi_mask.QSO
 
         # For a "bad" QSO simulate a normal star without color cuts, which isn't
@@ -334,23 +350,27 @@ def get_targets(nspec, program, tileid=None, seed=None, specify_targets=dict(), 
             #from desitarget.cuts import isQSO
             #star = STAR(wave=wave, colorcuts_function=isQSO)
             star = STAR(wave=wave)
-            simflux, wave1, meta1 = star.make_templates(nmodel=nobj, seed=seed, **obj_kwargs)
+            simflux, wave1, meta1, objmeta1 = star.make_templates(nmodel=nobj, seed=seed, **obj_kwargs)
             fibermap['DESI_TARGET'][ii] = desi_mask.QSO
 
         elif objtype == 'STD':
-            from desisim.templates import FSTD
-            fstd = FSTD(wave=wave)
-            simflux, wave1, meta1 = fstd.make_templates(nmodel=nobj, seed=seed, **obj_kwargs)
-            fibermap['DESI_TARGET'][ii] = desi_mask.STD_FSTAR
+            from desisim.templates import STD
+            std = STD(wave=wave)
+            simflux, wave1, meta1, objmeta1 = std.make_templates(nmodel=nobj, seed=seed, **obj_kwargs)
+            #- Loop options for forwards/backwards compatibility
+            for name in ['STD_FAINT', 'STD_FSTAR', 'STD']:
+                if name in desi_mask.names():
+                    fibermap['DESI_TARGET'][ii] |= desi_mask[name]
+                    break
 
         elif objtype == 'MWS_STAR':
             from desisim.templates import MWS_STAR
             mwsstar = MWS_STAR(wave=wave)
-            # todo: mag ranges for different programs of STAR targets should be in desimodel
-            if 'rmagrange' not in obj_kwargs.keys():
-                obj_kwargs['rmagrange'] = (15.0,20.0)
-            simflux, wave1, meta1 = mwsstar.make_templates(nmodel=nobj, seed=seed, **obj_kwargs)
-            fibermap['DESI_TARGET'][ii] = desi_mask.MWS_ANY
+            # TODO: mag ranges for different programs of STAR targets should be in desimodel
+            if 'magrange' not in obj_kwargs.keys():
+                obj_kwargs['magrange'] = (15.0,20.0)
+            simflux, wave1, meta1, objmeta1 = mwsstar.make_templates(nmodel=nobj, seed=seed, **obj_kwargs)
+            fibermap['DESI_TARGET'][ii] |= desi_mask.MWS_ANY
             #- MWS bit names changed after desitarget 0.6.0 so use number
             #- instead of name for now (bit 0 = mask 1 = MWS_MAIN currently)
             fibermap['MWS_TARGET'][ii] = 1
@@ -358,15 +378,24 @@ def get_targets(nspec, program, tileid=None, seed=None, specify_targets=dict(), 
         else:
             raise ValueError('Unable to simulate OBJTYPE={}'.format(objtype))
 
+        # Assign targetid
+        meta1['TARGETID'] = targetid[ii]
+        if hasattr(objmeta1, 'data'): # simqso.sqgrids.QsoSimPoints object
+            objmeta1.data['TARGETID'] = targetid[ii]
+        else:
+            if len(objmeta1) > 0:
+                objmeta1['TARGETID'] = targetid[ii]
+                # We want the dict key tied to the "true" object type (e.g., STAR),
+                # not, e.g., QSO_BAD.
+                objmeta[meta1['OBJTYPE'][0]] = objmeta1
+
         flux[ii] = simflux
         meta[ii] = meta1
 
-        fibermap['FILTER'][ii, :6] = ['DECAM_G', 'DECAM_R', 'DECAM_Z', 'WISE_W1', 'WISE_W2']
-        fibermap['MAG'][ii, 0] = 22.5 - 2.5 * np.log10(meta['FLUX_G'][ii])
-        fibermap['MAG'][ii, 1] = 22.5 - 2.5 * np.log10(meta['FLUX_R'][ii])
-        fibermap['MAG'][ii, 2] = 22.5 - 2.5 * np.log10(meta['FLUX_Z'][ii])
-        fibermap['MAG'][ii, 3] = 22.5 - 2.5 * np.log10(meta['FLUX_W1'][ii])
-        fibermap['MAG'][ii, 4] = 22.5 - 2.5 * np.log10(meta['FLUX_W2'][ii])
+        for band in ['G', 'R', 'Z', 'W1', 'W2']:
+            key = 'FLUX_'+band
+            fibermap[key][ii] = meta[key][ii]
+            #- TODO: FLUX_IVAR
 
     #- Load fiber -> positioner mapping and tile information
     fiberpos = desimodel.io.load_fiberpos()
@@ -384,22 +413,17 @@ def get_targets(nspec, program, tileid=None, seed=None, specify_targets=dict(), 
     fibermap['FIBER'] = np.arange(nspec, dtype='i4')
     fibermap['POSITIONER'] = fiberpos['POSITIONER'][specmin:specmin+nspec]
     fibermap['SPECTROID'] = fiberpos['SPECTROGRAPH'][specmin:specmin+nspec]
-    fibermap['TARGETID'] = np.random.randint(sys.maxsize, size=nspec)
     fibermap['TARGETCAT'] = np.zeros(nspec, dtype=(str, 20))
-    fibermap['LAMBDAREF'] = np.ones(nspec, dtype=np.float32)*5400
-    fibermap['RA_TARGET'] = ra
-    fibermap['DEC_TARGET'] = dec
-    fibermap['X_TARGET'] = x
-    fibermap['Y_TARGET'] = y
-    fibermap['X_FVCOBS'] = fibermap['X_TARGET']
-    fibermap['Y_FVCOBS'] = fibermap['Y_TARGET']
-    fibermap['X_FVCERR'] = np.zeros(nspec, dtype=np.float32)
-    fibermap['Y_FVCERR'] = np.zeros(nspec, dtype=np.float32)
-    fibermap['RA_OBS'] = fibermap['RA_TARGET']
-    fibermap['DEC_OBS'] = fibermap['DEC_TARGET']
+    fibermap['LAMBDA_REF'] = np.ones(nspec, dtype=np.float32)*5400
+    fibermap['TARGET_RA'] = ra
+    fibermap['TARGET_DEC'] = dec
+    fibermap['FIBERASSIGN_X'] = x
+    fibermap['FIBERASSIGN_Y'] = y
+    fibermap['FIBER_RA'] = fibermap['TARGET_RA']
+    fibermap['FIBER_DEC'] = fibermap['TARGET_DEC']
     fibermap['BRICKNAME'] = brick.brickname(ra, dec)
 
-    return fibermap, (flux, wave, meta)
+    return fibermap, (flux, wave, meta, objmeta)
 
 #-------------------------------------------------------------------------
 #- Currently unused, but keep around for now

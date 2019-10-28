@@ -87,8 +87,8 @@ def findfile(filetype, night, expid, camera=None, outdir=None, mkdir=True):
 #-------------------------------------------------------------------------
 #- simspec
 
-def write_simspec(sim, truth, fibermap, obs, expid, night, outdir=None, filename=None,
-    header=None, overwrite=False):
+def write_simspec(sim, truth, fibermap, obs, expid, night, objmeta=None,
+                  outdir=None, filename=None, header=None, overwrite=False):
     '''
     Write a simspec file
 
@@ -101,6 +101,7 @@ def write_simspec(sim, truth, fibermap, obs, expid, night, outdir=None, filename
             MOONFRAC (0-1), MOONALT (deg), MOONSEP (deg)
         expid (int): integer exposure ID
         night (str): YEARMMDD string
+        objmeta (dict): objtype-specific metadata
         outdir (str, optional): output directory
         filename (str, optional): if None, auto-derive from envvars, night, expid, and outdir
         header (dict-like): header to include in HDU0
@@ -114,6 +115,11 @@ def write_simspec(sim, truth, fibermap, obs, expid, night, outdir=None, filename
     import desiutil.depend
     from desiutil.log import get_logger
     log = get_logger()
+
+    import warnings
+    warnings.filterwarnings("ignore", message=".*Dex.* did not parse as fits unit")
+    warnings.filterwarnings("ignore", message=".*nanomaggies.* did not parse as fits unit")
+    warnings.filterwarnings("ignore", message=".*10\*\*6 arcsec.* did not parse as fits unit")
 
     if filename is None:
         filename = findfile('simspec', night, expid, outdir=outdir)
@@ -225,8 +231,33 @@ def write_simspec(sim, truth, fibermap, obs, expid, night, outdir=None, filename
         obs_hdu.header['EXTNAME'] = 'OBSCONDITIONS'
         hx.append(obs_hdu)
 
+    # Objtype-specific metadata
+    if truth is not None and objmeta is not None:
+        for obj in sorted(objmeta.keys()):
+            extname = 'TRUTH_{}'.format(obj.upper())
+            if hasattr(objmeta[obj], 'data'): # simqso.sqgrids.QsoSimPoints object
+                tab = objmeta[obj].data
+                tab.meta['COSMO'] = objmeta[obj].cosmo_str(objmeta[obj].cosmo)
+                tab.meta['GRIDUNIT'] = objmeta[obj].units
+                tab.meta['GRIDDIM'] = str(objmeta[obj].gridShape)
+                tab.meta['RANDSEED'] = str(objmeta[obj].seed)
+                if objmeta[obj].photoMap is not None:
+                    tab.meta['OBSBANDS'] = ','.join(objmeta[obj].photoMap['bandpasses'])
+                for i,var in enumerate(objmeta[obj].qsoVars):
+                    var.updateMeta(tab.meta,'AX%d'%i)
+                tab.meta['NSIMVAR'] = len(objmeta[obj].qsoVars)
+
+                objhdu = fits.table_to_hdu(tab)
+                objhdu.header['EXTNAME'] = extname
+                hx.append(objhdu)
+            else:
+                if len(objmeta) > 0 and len(objmeta[obj]) > 0:
+                    objhdu = fits.table_to_hdu(objmeta[obj])
+                    objhdu.header['EXTNAME'] = extname
+                    hx.append(objhdu)
+
     log.info('Writing {}'.format(filename))
-    hx.writeto(filename, clobber=overwrite)
+    hx.writeto(filename, overwrite=overwrite)
 
 def write_simspec_arc(filename, wave, phot, header, fibermap, overwrite=False):
     '''
@@ -235,6 +266,11 @@ def write_simspec_arc(filename, wave, phot, header, fibermap, overwrite=False):
     import astropy.table
     import astropy.units as u
 
+    import warnings
+    warnings.filterwarnings("ignore", message=".*Dex.* did not parse as fits unit")
+    warnings.filterwarnings("ignore", message=".*nanomaggies.* did not parse as fits unit")
+    warnings.filterwarnings("ignore", message=".*10\*\*6 arcsec.* did not parse as fits unit")
+                    
     hx = fits.HDUList()
     hdr = desispec.io.util.fitsheader(header)
     hdr['FLAVOR'] = 'arc'
@@ -263,7 +299,7 @@ def write_simspec_arc(filename, wave, phot, header, fibermap, overwrite=False):
     hx.append(fibermap_hdu)
 
     log.info('Writing {}'.format(filename))
-    hx.writeto(filename, clobber=overwrite)
+    hx.writeto(filename, overwrite=overwrite)
     return filename
 
 class SimSpecCamera(object):
@@ -313,7 +349,7 @@ class SimSpec(object):
 
     """
     def __init__(self, flavor, wave, flux, skyflux, fibermap,
-                 truth, obsconditions, header):
+                 truth, obsconditions, header, objtruth=None):
         """
         Create a SimSpec object
 
@@ -326,6 +362,7 @@ class SimSpec(object):
             truth: table of truth metadata information about these spectra
             obsconditions (dict-like): observing conditions; see notes below
             header : FITS header from HDU0
+            objtruth: additional object type specific metadata information 
 
         Notes:
           * all inputs must be specified but can be None, depending upon flavor,
@@ -354,6 +391,7 @@ class SimSpec(object):
         self.skyflux = skyflux
         self.fibermap = fibermap
         self.truth = truth
+        self.objtruth = objtruth
         self.obsconditions = obsconditions
         self.header = header
 
@@ -418,6 +456,7 @@ def read_simspec(filename, cameras=None, comm=None, readflux=True, readphot=True
     #- Read and broadcast data that are common across cameras
     header = flavor = truth = fibermap = obsconditions = None
     wave = flux = skyflux = None
+    objtruth = dict() # =objmeta in desisim.templates
     if rank == 0:
         with fits.open(filename, memmap=False) as fx:
             header = fx[0].header.copy()
@@ -435,6 +474,24 @@ def read_simspec(filename, cameras=None, comm=None, readflux=True, readphot=True
             if 'TRUTH' in fx:
                 truth = Table(fx['TRUTH'].data)
 
+                if 'OBJTYPE' in truth.colnames:
+                    objtype = truth['OBJTYPE'] # output of desisim.obs.new_exposure
+                else:
+                    objtype = truth['TEMPLATETYPE'] # output of desitarget.mock.build.write_targets_truth
+
+                for obj in set(objtype):
+                    extname = 'TRUTH_{}'.format(obj.upper())
+                    if extname in fx:
+                        # This snippet of code reads a QsoSimObjects extension,
+                        # which is currently deprecated.
+                        if 'COSMO' in fx[extname].header:
+                            from simqso.sqgrids import QsoSimObjects
+                            qsometa = QsoSimObjects()
+                            qsometa.read(filename, extname=extname)
+                            objtruth[obj] = qsometa
+                        else:
+                            objtruth[obj] = Table(fx[extname].data)
+
             if 'FIBERMAP' in fx:
                 fibermap = Table(fx['FIBERMAP'].data)
 
@@ -445,6 +502,7 @@ def read_simspec(filename, cameras=None, comm=None, readflux=True, readphot=True
         header = comm.bcast(header, root=0)
         flavor = comm.bcast(flavor, root=0)
         truth = comm.bcast(truth, root=0)
+        objtruth = comm.bcast(objtruth, root=0)
         fibermap = comm.bcast(fibermap, root=0)
         obsconditions = comm.bcast(obsconditions, root=0)
 
@@ -473,9 +531,11 @@ def read_simspec(filename, cameras=None, comm=None, readflux=True, readphot=True
         skyflux = skyflux[ii]
     if truth is not None:
         truth = truth[ii]
+        # @sbailey - Not sure if we need to do anything with objtruth here
 
     simspec = SimSpec(flavor, wave, flux, skyflux,
-                fibermap, truth, obsconditions, header)
+                      fibermap, truth, obsconditions, header,
+                      objtruth=objtruth)
 
     #- Now read individual camera photons
     #- NOTE: this is somewhat inefficient since the same PHOT_B/R/Z HDUs
@@ -644,7 +704,7 @@ def find_cosmics(camera, exptime=1000, cosmics_dir=None):
         exptime (int, optional): exposure time in seconds
         cosmics_dir (str, optional): directory to look for cosmics templates; defaults to
             $DESI_COSMICS_TEMPLATES if set or otherwise
-            $DESI_ROOT/spectro/templates/cosmics/v0.2  (note HARDCODED version)
+            $DESI_ROOT/spectro/templates/cosmics/v0.3  (note HARDCODED version)
 
     Exposure times <120 sec will use the bias templates; otherwise they will
     use the dark cosmics templates
@@ -653,7 +713,7 @@ def find_cosmics(camera, exptime=1000, cosmics_dir=None):
         if 'DESI_COSMICS_TEMPLATES' in os.environ:
             cosmics_dir = os.environ['DESI_COSMICS_TEMPLATES']
         else:
-            cosmics_dir = os.environ['DESI_ROOT']+'/spectro/templates/cosmics/v0.2/'
+            cosmics_dir = os.environ['DESI_ROOT']+'/spectro/templates/cosmics/v0.3/'
 
     if exptime < 120:
         exptype = 'bias'
@@ -744,30 +804,31 @@ def read_cosmics(filename, expid=1, shape=None, jitter=True):
         meta['CRSHIFTX'] = (0, 'Input cosmics image shift in x')
         meta['CRSHIFTY'] = (0, 'Input cosmics image shift in y')
 
-    del meta['RDNOISE0']
-    #- Amp 1 lower left
+    if 'RDNOISE0' in meta :
+        del meta['RDNOISE0']
+    #- Amp A lower left
     nx = pix.shape[1] // 2
     ny = pix.shape[0] // 2
     iixy = np.s_[0:ny, 0:nx]
     cx = pix[iixy][mask[iixy] == 0]
     mean, median, std = sigma_clipped_stats(cx, sigma=3, iters=5)
-    meta['RDNOISE1'] = std
+    meta['RDNOISEA'] = std
 
-    #- Amp 2 lower right
+    #- Amp B lower right
     iixy = np.s_[0:ny, nx:2*nx]
     cx = pix[iixy][mask[iixy] == 0]
     mean, median, std = sigma_clipped_stats(cx, sigma=3, iters=5)
-    meta['RDNOISE2'] = std
+    meta['RDNOISEB'] = std
 
-    #- Amp 3 upper left
+    #- Amp C upper left
     iixy = np.s_[ny:2*ny, 0:nx]
     mean, median, std = sigma_clipped_stats(pix[iixy], sigma=3, iters=5)
-    meta['RDNOISE3'] = std
+    meta['RDNOISEC'] = std
 
-    #- Amp 4 upper right
+    #- Amp D upper right
     iixy = np.s_[ny:2*ny, nx:2*nx]
     mean, median, std = sigma_clipped_stats(pix[iixy], sigma=3, iters=5)
-    meta['RDNOISE4'] = std
+    meta['RDNOISED'] = std
     fx.close()
 
     return Image(pix, ivar, mask, meta=meta)
@@ -831,7 +892,7 @@ def read_basis_templates(objtype, subtype='', outwave=None, nspec=None,
 
     Args:
 
-        objtype (str): object type to read (e.g., ELG, LRG, QSO, STAR, FSTD, WD,
+        objtype (str): object type to read (e.g., ELG, LRG, QSO, STAR, STD, WD,
           MWS_STAR, BGS).
         subtype (str, optional): template subtype, currently only for white
             dwarfs.  The choices are DA and DB and the default is to read both
@@ -866,7 +927,7 @@ def read_basis_templates(objtype, subtype='', outwave=None, nspec=None,
         log = get_logger()
 
     ltype = objtype.lower()
-    if objtype == 'FSTD':
+    if objtype == 'STD':
         ltype = 'star'
     if objtype == 'MWS_STAR':
         ltype = 'star'
@@ -919,9 +980,34 @@ def read_basis_templates(objtype, subtype='', outwave=None, nspec=None,
         meta = Table(fitsio.read(infile, ext=1, upper=True, columns=(
             'SDSS_NAME', 'RA', 'DEC', 'PLATE', 'MJD', 'FIBERID')))
     else:
-        flux, hdr = fitsio.read(infile, ext=0, header=True)
-        meta = Table(fitsio.read(infile, ext=1, upper=True))
-        wave = fitsio.read(infile, ext=2)
+        with fits.open(infile) as fx:
+            try:
+                flux = fx['FLUX'].data
+                meta = Table(fx['METADATA'].data)
+                wave = fx['WAVE'].data
+            except:
+                flux = fx[0].data
+                meta = Table(fx[1].data)
+                wave = fx[2].data
+
+            if 'COLORS' in fx:
+                colors = fx['COLORS'].data
+                hdr = fx['COLORS'].header
+                for ii, col in enumerate(hdr['COLORS'].split(',')):
+                    meta[col.upper()] = colors[:, ii].flatten()
+
+            if 'DESI-COLORS' in fx:
+                colors = fx['DESI-COLORS'].data
+                for col in colors.names:
+                    meta[col.upper()] = colors[col]
+
+        #- Check if we have correct version
+        if objtype.upper() in ('ELG', 'LRG'):
+            if 'BASS_G' not in meta.keys():
+                log.error('missing BASS_G from template metadata')
+                log.error('Is your DESI_BASIS_TEMPLATES too old? {}'.format(os.getenv('DESI_BASIS_TEMPLATES')))
+                log.error('Please update DESI_BASIS_TEMPLATES to v3.0 or later')
+                raise IOError('Incompatible basis templates; please update to v3.0 or later')
 
         if (objtype.upper() == 'WD') and (subtype != ''):
             if 'WDTYPE' not in meta.colnames:
@@ -959,54 +1045,27 @@ def read_basis_templates(objtype, subtype='', outwave=None, nspec=None,
 
     return outflux, outwave, meta
 
-def write_templates(outfile, flux, wave, meta):
-    """Write out simulated galaxy templates.
-
-    Args:
-        outfile (str): Output file name.
-        flux (numpy.ndarray): Flux vector (1e-17 erg/s/cm2/A)
-        wave (numpy.ndarray): Wavelength vector (Angstrom).
-        meta (astropy.table.Table): metadata table.
-
-    """
-    from astropy.io import fits
-    from desispec.io.util import makepath
-
-    # Create the path to OUTFILE if necessary.
-    outfile = makepath(outfile)
-
-    hx = fits.HDUList()
-    hdu_wave = fits.PrimaryHDU(wave)
-    hdu_wave.header['EXTNAME'] = 'WAVE'
-    hdu_wave.header['BUNIT'] = 'Angstrom'
-    hdu_wave.header['AIRORVAC']  = ('vac', 'Vacuum wavelengths')
-    hx.append(hdu_wave)
-
-    hdu_flux = fits.ImageHDU(flux)
-    hdu_flux.header['EXTNAME'] = 'FLUX'
-    hdu_flux.header['BUNIT'] = str(fluxunits)
-    hx.append(hdu_flux)
-
-    hdu_meta = fits.table_to_hdu(meta)
-    hdu_meta.header['EXTNAME'] = 'METADATA'
-    hx.append(hdu_meta)
-
-    log.info('Writing {}'.format(outfile))
-    try:
-        hx.writeto(outfile, overwrite=True)
-    except:
-        hx.writeto(outfile, clobber=True)
-
 #-------------------------------------------------------------------------
 #- Utility functions
 
-def simdir(night='', expid=0, mkdir=False):
+def simdir(night=None, expid=None, mkdir=False):
     """
     Return $DESI_SPECTRO_SIM/$PIXPROD/{night}
     If mkdir is True, create directory if needed
     """
-    dirname = os.path.join(os.getenv('DESI_SPECTRO_SIM'), os.getenv('PIXPROD'),
-         str(night), '{:08d}'.format(expid))
+
+    if (night is None) and (expid is None):
+        dirname = os.path.join(
+            os.getenv('DESI_SPECTRO_SIM'), os.getenv('PIXPROD')
+            )
+    #- must provide night+expid, and catch old usage where mkdir was 2nd arg
+    elif (expid is None) or isinstance(expid, bool):
+        raise ValueError("Must provide int expid, not {}".format(expid))
+    else:
+        dirname = os.path.join(
+            os.getenv('DESI_SPECTRO_SIM'), os.getenv('PIXPROD'),
+            str(night), '{:08d}'.format(expid)
+            )
     if mkdir and not os.path.exists(dirname):
         os.makedirs(dirname)
 
@@ -1028,90 +1087,153 @@ def _parse_filename(filename):
     elif len(x) == 3:
         return x[0], x[1].lower(), int(x[2])
 
-def empty_metatable(nmodel=1, objtype='ELG', subtype='', add_SNeIa=None):
-    """Initialize the metadata table for each object type."""
+                
+def empty_metatable(nmodel=1, objtype='ELG', subtype='', simqso=False, input_meta=False):
+    """Initialize template metadata tables depending on the given object type. 
+
+    Parameters
+    ----------
+    nmodel : :class:`int`
+        Number of rows in output table.  Defaults to 1.
+    objtype : :class:`str`
+        Object type.  Defaults to ELG.
+    subtype : :class:`str`
+        Subtype for the given object type (e.g., LYA is objtype=QSO).
+        Defaults to `.`
+    simqso : :class:`bool`
+        Initialize a templates.SIMQSO-style objmeta table rather than a
+        templates.QSO one.  Defaults to False.
+    input_meta : :class:`bool`
+        Initialize an input_meta table for use with the various
+        desisim.templates classes (see its use in, e.g.,
+        desitarget.mock.mockmaker) Defaults to False.
+
+    Returns
+    -------
+    meta : :class:`astropy.table.Table`
+        Metadata table which is agnostic about the object type. 
+    objmeta : :class:`astropy.table.Table`
+        Objtype-specific supplemental metadata table (e.g., containing the [OII]
+        flux for ELG targets and surface gravity for stars.
+
+    """
     from astropy.table import Table, Column
 
+    targetid = np.arange(nmodel).astype(np.int64)
+        
+    # Objtype-agnostic metadata
     meta = Table()
-    meta.add_column(Column(name='OBJTYPE', length=nmodel, dtype='U10'))
-    meta.add_column(Column(name='SUBTYPE', length=nmodel, dtype='U10'))
-    meta.add_column(Column(name='TEMPLATEID', length=nmodel, dtype='i4',
-                           data=np.zeros(nmodel)-1))
-    meta.add_column(Column(name='SEED', length=nmodel, dtype='int64',
-                           data=np.zeros(nmodel)-1))
-    meta.add_column(Column(name='REDSHIFT', length=nmodel, dtype='f4',
-                           data=np.zeros(nmodel)))
-    meta.add_column(Column(name='MAG', length=nmodel, dtype='f4',
-                           data=np.zeros(nmodel)-1, unit='mag'))
-    meta.add_column(Column(name='FLUX_G', length=nmodel, dtype='f4',
-                           unit='nanomaggies'))
-    meta.add_column(Column(name='FLUX_R', length=nmodel, dtype='f4',
-                           unit='nanomaggies'))
-    meta.add_column(Column(name='FLUX_Z', length=nmodel, dtype='f4',
-                           unit='nanomaggies'))
-    meta.add_column(Column(name='FLUX_W1', length=nmodel, dtype='f4',
-                           unit='nanomaggies'))
-    meta.add_column(Column(name='FLUX_W2', length=nmodel, dtype='f4',
-                           unit='nanomaggies'))
+    if input_meta:
+        meta.add_column(Column(name='TEMPLATEID', length=nmodel, dtype='i2', data=np.zeros(nmodel)-1))
+        meta.add_column(Column(name='SEED', length=nmodel, dtype='int64', data=np.zeros(nmodel)-1))
+        meta.add_column(Column(name='REDSHIFT', length=nmodel, dtype='f4', data=np.zeros(nmodel)))
+        meta.add_column(Column(name='MAG', length=nmodel, dtype='f4', data=np.zeros(nmodel)-1, unit='mag')) # normalization magnitude
+        meta.add_column(Column(name='MAGFILTER', length=nmodel, dtype='U15')) # normalization filter
+        return meta
+    else:
+        meta.add_column(Column(name='TARGETID', data=targetid))
+        meta.add_column(Column(name='OBJTYPE', length=nmodel, dtype='U10'))
+        meta.add_column(Column(name='SUBTYPE', length=nmodel, dtype='U10'))
+        meta.add_column(Column(name='TEMPLATEID', length=nmodel, dtype='i2', data=np.zeros(nmodel)-1))
+        meta.add_column(Column(name='SEED', length=nmodel, dtype='int64', data=np.zeros(nmodel)-1))
+        meta.add_column(Column(name='REDSHIFT', length=nmodel, dtype='f4', data=np.zeros(nmodel)))
+        meta.add_column(Column(name='MAG', length=nmodel, dtype='f4', data=np.zeros(nmodel)-1, unit='mag')) # normalization magnitude
+        meta.add_column(Column(name='MAGFILTER', length=nmodel, dtype='U15')) # normalization filter
+        meta.add_column(Column(name='FLUX_G', length=nmodel, dtype='f4', unit='nanomaggies'))
+        meta.add_column(Column(name='FLUX_R', length=nmodel, dtype='f4', unit='nanomaggies'))
+        meta.add_column(Column(name='FLUX_Z', length=nmodel, dtype='f4', unit='nanomaggies'))
+        meta.add_column(Column(name='FLUX_W1', length=nmodel, dtype='f4', unit='nanomaggies'))
+        meta.add_column(Column(name='FLUX_W2', length=nmodel, dtype='f4', unit='nanomaggies'))
 
-    meta.add_column(Column(name='OIIFLUX', length=nmodel, dtype='f4',
-                           data=np.zeros(nmodel)-1, unit='erg/(s*cm2)'))
-    meta.add_column(Column(name='HBETAFLUX', length=nmodel, dtype='f4',
-                           data=np.zeros(nmodel)-1, unit='erg/(s*cm2)'))
-    meta.add_column(Column(name='EWOII', length=nmodel, dtype='f4',
-                           data=np.zeros(nmodel)-1, unit='Angstrom'))
-    meta.add_column(Column(name='EWHBETA', length=nmodel, dtype='f4',
-                           data=np.zeros(nmodel)-1, unit='Angstrom'))
+        meta['OBJTYPE'] = objtype.upper()
+        meta['SUBTYPE'] = subtype.upper()
 
-    meta.add_column(Column(name='D4000', length=nmodel, dtype='f4', data=np.zeros(nmodel)-1))
-    meta.add_column(Column(name='VDISP', length=nmodel, dtype='f4',
-                           data=np.zeros(nmodel)-1, unit='km/s'))
-    meta.add_column(Column(name='OIIDOUBLET', length=nmodel, dtype='f4', data=np.zeros(nmodel)-1))
-    meta.add_column(Column(name='OIIIHBETA', length=nmodel, dtype='f4',
-                           data=np.zeros(nmodel)-1, unit='Dex'))
-    meta.add_column(Column(name='OIIHBETA', length=nmodel, dtype='f4',
-                           data=np.zeros(nmodel)-1, unit='Dex'))
-    meta.add_column(Column(name='NIIHBETA', length=nmodel, dtype='f4',
-                           data=np.zeros(nmodel)-1, unit='Dex'))
-    meta.add_column(Column(name='SIIHBETA', length=nmodel, dtype='f4',
-                           data=np.zeros(nmodel)-1, unit='Dex'))
+    # Objtype-specific metadata
+    objmeta = Table()
+    if objtype.upper() == 'ELG' or objtype.upper() == 'LRG' or objtype.upper() == 'BGS':
+        objmeta.add_column(Column(name='TARGETID', data=targetid))
+        objmeta.add_column(Column(name='OIIFLUX', length=nmodel, dtype='f4',
+                                  data=np.zeros(nmodel)-1, unit='erg/(s*cm2)'))
+        objmeta.add_column(Column(name='HBETAFLUX', length=nmodel, dtype='f4',
+                                  data=np.zeros(nmodel)-1, unit='erg/(s*cm2)'))
+        objmeta.add_column(Column(name='EWOII', length=nmodel, dtype='f4',
+                                  data=np.zeros(nmodel)-1, unit='Angstrom'))
+        objmeta.add_column(Column(name='EWHBETA', length=nmodel, dtype='f4',
+                                  data=np.zeros(nmodel)-1, unit='Angstrom'))
+        objmeta.add_column(Column(name='D4000', length=nmodel, dtype='f4', data=np.zeros(nmodel)-1))
+        objmeta.add_column(Column(name='VDISP', length=nmodel, dtype='f4',
+                                  data=np.zeros(nmodel)-1, unit='km/s'))
+        objmeta.add_column(Column(name='OIIDOUBLET', length=nmodel, dtype='f4', data=np.zeros(nmodel)-1))
+        objmeta.add_column(Column(name='OIIIHBETA', length=nmodel, dtype='f4',
+                                  data=np.zeros(nmodel)-1, unit='Dex'))
+        objmeta.add_column(Column(name='OIIHBETA', length=nmodel, dtype='f4',
+                                  data=np.zeros(nmodel)-1, unit='Dex'))
+        objmeta.add_column(Column(name='NIIHBETA', length=nmodel, dtype='f4',
+                                  data=np.zeros(nmodel)-1, unit='Dex'))
+        objmeta.add_column(Column(name='SIIHBETA', length=nmodel, dtype='f4',
+                                  data=np.zeros(nmodel)-1, unit='Dex'))
 
-    meta.add_column(Column(name='ZMETAL', length=nmodel, dtype='f4',
-                           data=np.zeros(nmodel)-1))
-    meta.add_column(Column(name='AGE', length=nmodel, dtype='f4',
-                           data=np.zeros(nmodel)-1, unit='Gyr'))
+    elif objtype.upper() == 'QSO':
+        objmeta.add_column(Column(name='TARGETID', data=targetid))
+        if simqso:
+            objmeta.add_column(Column(name='MABS_1450', length=nmodel, dtype='f4',
+                                      data=np.zeros(nmodel)-1, unit='mag'))
+            objmeta.add_column(Column(name='SLOPES', length=nmodel, dtype='f4',
+                                      data=np.zeros( (nmodel, 5) )-1))
+            objmeta.add_column(Column(name='EMLINES', length=nmodel, dtype='f4',
+                                      data=np.zeros( (nmodel, 62, 3) )-1))
+        else:
+            objmeta.add_column(Column(name='PCA_COEFF', length=nmodel, dtype='f4',
+                                      data=np.zeros( (nmodel, 4) )))
+        objmeta.add_column(Column(name='BAL_TEMPLATEID', length=nmodel, dtype='i2', data=np.zeros(nmodel)-1))
+        #objmeta.add_column(Column(name='DLA', length=nmodel, dtype=bool))
+        #objmeta.add_column(Column(name='METALS', length=nmodel, dtype=bool))
 
-    meta.add_column(Column(name='TEFF', length=nmodel, dtype='f4',
-                           data=np.zeros(nmodel)-1, unit='K'))
-    meta.add_column(Column(name='LOGG', length=nmodel, dtype='f4',
-                           data=np.zeros(nmodel)-1, unit='m/(s**2)'))
-    meta.add_column(Column(name='FEH', length=nmodel, dtype='f4',
-                           data=np.zeros(nmodel)-1))
+    elif objtype.upper() == 'STAR' or objtype.upper() == 'STD' or objtype.upper() == 'MWS_STAR':
+        objmeta.add_column(Column(name='TARGETID', data=targetid))
+        objmeta.add_column(Column(name='TEFF', length=nmodel, dtype='f4',
+                                  data=np.zeros(nmodel)-1, unit='K'))
+        objmeta.add_column(Column(name='LOGG', length=nmodel, dtype='f4',
+                                  data=np.zeros(nmodel)-1, unit='m/(s**2)'))
+        objmeta.add_column(Column(name='FEH', length=nmodel, dtype='f4',
+                                  data=np.zeros(nmodel)-1))
 
-    if add_SNeIa:
-        meta.add_column(Column(name='SNE_TEMPLATEID', length=nmodel, dtype='i4',
-                               data=np.zeros(nmodel)-1))
-        meta.add_column(Column(name='SNE_RFLUXRATIO', length=nmodel, dtype='f4',
-                               data=np.zeros(nmodel)-1))
-        meta.add_column(Column(name='SNE_EPOCH', length=nmodel, dtype='f4',
-                               data=np.zeros(nmodel)-1, unit='days'))
+    elif objtype.upper() == 'WD':
+        objmeta.add_column(Column(name='TARGETID', data=targetid))
+        objmeta.add_column(Column(name='TEFF', length=nmodel, dtype='f4',
+                                  data=np.zeros(nmodel)-1, unit='K'))
+        objmeta.add_column(Column(name='LOGG', length=nmodel, dtype='f4',
+                                  data=np.zeros(nmodel)-1, unit='m/(s**2)'))
 
-    meta['OBJTYPE'] = objtype.upper()
-    meta['SUBTYPE'] = subtype.upper()
+    return meta, objmeta
 
-    return meta
+                
+def empty_snemetatable(nmodel=1):
+    """Initialize a metadata table for SNE.
 
-def empty_star_properties(nstar=1):
-    """Initialize a "star_properties" table for desisim.templates."""
+    Parameters
+    ----------
+    nmodel : :class:`int`
+        Number of rows in output table.  Defaults to 1.
+
+    Returns
+    -------
+    snemeta : :class:`astropy.table.Table`
+        Metadata table.
+
+    """
     from astropy.table import Table, Column
 
-    star_properties = Table()
-    star_properties.add_column(Column(name='REDSHIFT', length=nstar, dtype='f4'))
-    star_properties.add_column(Column(name='MAG', length=nstar, dtype='f4'))
-    star_properties.add_column(Column(name='TEFF', length=nstar, dtype='f4'))
-    star_properties.add_column(Column(name='LOGG', length=nstar, dtype='f4'))
-    star_properties.add_column(Column(name='FEH', length=nstar, dtype='f4'))
-    star_properties.add_column(Column(name='SEED', length=nstar, dtype='int64',
-                                      data=np.zeros(nstar)-1))
+    targetid = np.arange(nmodel).astype(np.int64)
 
-    return star_properties
+    snemeta = Table()
+    snemeta.add_column(Column(name='TARGETID', data=targetid))
+    snemeta.add_column(Column(name='SNE_TEMPLATEID', length=nmodel, dtype='i2',
+                              data=np.zeros(nmodel)-1))
+    snemeta.add_column(Column(name='SNE_FLUXRATIO', length=nmodel, dtype='f4',
+                              data=np.zeros(nmodel)-1))
+    snemeta.add_column(Column(name='SNE_EPOCH', length=nmodel, dtype='f4',
+                              data=np.zeros(nmodel)-1, unit='days'))
+    SNEmeta.add_column(Column(name='SNE_FILTER', length=nmodel, dtype='U15')) # normalization filter
+    
+    return snemeta

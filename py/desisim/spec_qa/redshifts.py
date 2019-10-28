@@ -20,6 +20,12 @@ import matplotlib.gridspec as gridspec
 from astropy.io import fits
 from astropy.table import Table, vstack, hstack, MaskedColumn, join
 
+try:
+    from scipy import constants
+    C_LIGHT = constants.c/1000.0
+except TypeError: # This can happen during documentation builds.
+    C_LIGHT = 299792458.0/1000.0
+
 import desispec.io
 from .utils import elg_flux_lim, get_sty_otype, catastrophic_dv, match_otype
 
@@ -48,7 +54,7 @@ def calc_obj_stats(simz_tab, objtype):
     Parameters
     ----------
     simz_tab : Table
-        This parameter is not documented.
+        TODO: document this
     objtype : str
         Object type, e.g. 'ELG', 'LRG'
 
@@ -179,8 +185,8 @@ def find_zbest_files(fibermap_data):
     # Init
     zbest_files = []
     # Search for zbest files with healpy
-    ra_targ = fibermap_data['RA_TARGET'].data
-    dec_targ = fibermap_data['DEC_TARGET'].data
+    ra_targ = fibermap_data['TARGET_RA'].data
+    dec_targ = fibermap_data['TARGET_DEC'].data
     # Getting some NAN in RA/DEC
     good = np.isfinite(ra_targ) & np.isfinite(dec_targ)
     pixels = radec2pix(64, ra_targ[good], dec_targ[good])
@@ -236,13 +242,24 @@ def load_z(fibermap_files, zbest_files=None, outfil=None):
         sps_hdu = fits.open(simspec_file)
         # Make Tables
         fbm_tabs.append(Table(sps_hdu['FIBERMAP'].data,masked=True))
-        sps_tabs.append(Table(sps_hdu['TRUTH'].data,masked=True))
+        truth = Table(sps_hdu['TRUTH'].data,masked=True)
+        if 'TRUTH_ELG' in sps_hdu:
+           truth_elg = Table(sps_hdu['TRUTH_ELG'].data)
+           truth = join(truth, truth_elg['TARGETID', 'OIIFLUX'],
+                   keys='TARGETID', join_type='left')
+        else:
+            truth['OIIFLUX'] = 0.0
+
+        sps_tabs.append(truth)
         sps_hdu.close()
 
-    # Stack
+    # Stack + Sort
     fbm_tab = vstack(fbm_tabs)
     sps_tab = vstack(sps_tabs)
     del fbm_tabs, sps_tabs
+
+    fbm_tab.sort('TARGETID')
+    sps_tab.sort('TARGETID')
 
     # Add the version number header keywords from fibermap_files[0]
     hdr = fits.getheader(fibermap_files[0].replace('fibermap', 'simspec'))
@@ -255,11 +272,14 @@ def load_z(fibermap_files, zbest_files=None, outfil=None):
     fbm_tab = fbm_tab[uni_idx]
     sps_tab = sps_tab[uni_idx]
 
-    # Combine + Sort
-    sps_tab.remove_column('TARGETID')  # It occurs in both tables
-    sps_tab.remove_column('MAG')  # It occurs in both tables
-    simz_tab = hstack([fbm_tab,sps_tab],join_type='exact')
-    simz_tab.sort('TARGETID')
+    # Combine
+    assert np.all(fbm_tab['TARGETID'] == sps_tab['TARGETID'])
+    keep_colnames = list()
+    for colname in sps_tab.colnames:
+        if colname not in fbm_tab.colnames:
+            keep_colnames.append(colname)
+
+    simz_tab = hstack([fbm_tab,sps_tab[keep_colnames]],join_type='exact')
 
     # Cleanup some names
     #simz_tab.rename_column('OBJTYPE_1', 'OBJTYPE')
@@ -516,7 +536,7 @@ def criteria(simz_tab, objtype=None, dvlimit=None):
         else:
             dv = dvlimit
         dz = calc_dz(simz_tab[omask]) # dz/1+z
-        cat = np.where(np.abs(dz)*3e5 > dv)[0]
+        cat = np.where(np.abs(dz)*C_LIGHT > dv)[0]
         dv_mask[omask[cat]] = False
     # Return
     return objtype_mask, z_mask, survey_mask, dv_mask, zwarn_mask
@@ -690,15 +710,19 @@ def obj_fig(simz_tab, objtype, summ_stats, outfile=None):
                     yval = yval[gdy]
                     xmin,xmax=0.5,20
                     ax.set_xscale("log", nonposx='clip')
+                elif objtype == 'QSO':
+                    lbl = 'g (Mag)'
+                    xval = 22.5 - 2.5 * np.log10(gdz_tab['FLUX_G'])
+                    xmin,xmax=np.min(xval),np.max(xval)
                 else:
-                    lbl = '{:s} (Mag)'.format(gdz_tab[0]['FILTER'][0])
-                    xval = gdz_tab['MAG'][:,0]
+                    lbl = 'r (Mag)'
+                    xval = 22.5 - 2.5 * np.log10(gdz_tab['FLUX_R'])
                     xmin,xmax=np.min(xval),np.max(xval)
             # Labels
             ax.set_xlabel(lbl)
             ax.set_ylabel(ylbl)
             ax.set_xlim(xmin,xmax)
-            v_ylim = ylim * 3e5  # redshift to km/s
+            v_ylim = ylim * C_LIGHT  # redshift to km/s
             ax.set_ylim(-v_ylim+yoff, v_ylim+yoff)
 
             # Points
@@ -712,7 +736,7 @@ def obj_fig(simz_tab, objtype, summ_stats, outfile=None):
                 xbins = np.linspace(xmin, xmax, 20)
             ybins = np.linspace(-v_ylim+yoff, v_ylim+yoff, 40) # km/s
             #import pdb; pdb.set_trace()
-            counts, xedges, yedges = np.histogram2d(xval, yval * 3e5, bins=(xbins, ybins))
+            counts, xedges, yedges = np.histogram2d(xval, yval * C_LIGHT, bins=(xbins, ybins))
             max_c = np.max(counts)
             #if kk == 3:
             ax.pcolormesh(xedges, yedges, counts.transpose(), cmap=cm, vmin=0, vmax=max_c/5.)
@@ -1043,7 +1067,7 @@ def dz_summ(simz_tab, outfile=None, pdict=None, min_count=20):
 
             # Simple stats
             ok = survey['ZWARN'] == 0
-            dv = calc_dz(survey)*3e5 # dz/1+z
+            dv = calc_dz(survey)*C_LIGHT # dz/1+z
             bad = dv > catastrophic_dv(otype)
             #if i==2:
             #    pdb.set_trace()
@@ -1054,13 +1078,12 @@ def dz_summ(simz_tab, outfile=None, pdict=None, min_count=20):
             elif ptype == 'OIIFLUX':
                 x = survey['OIIFLUX']
             else:
-                log.warning('Assuming hardcoded filter order')
                 if ptype == 'GMAG':
-                    x = survey['MAG'][:,0]
+                    x = 22.5 - 2.5*np.log10(survey['FLUX_G'])
                 elif ptype == 'RMAG':
-                    x = survey['MAG'][:,1]
+                    x = 22.5 - 2.5*np.log10(survey['FLUX_R'])
                 elif ptype == 'ZMAG':
-                    x = survey['MAG'][:,2]
+                    x = 22.5 - 2.5*np.log10(survey['FLUX_Z'])
                 else:
                     raise ValueError('unknown ptype {}'.format(ptype))
 

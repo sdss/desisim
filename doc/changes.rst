@@ -2,7 +2,177 @@
 desisim change log
 ==================
 
-0.28.0 (unreleased)
+0.34.1 (unreleased)
+-------------------
+
+* No changes yet.
+
+0.34.0 (2019-10-17)
+-------------------
+
+Requires desispec/0.30.0 or later.
+
+* Support mocks in bright/dark subdirs (`PR #508`_).
+* Support FIBERASSIGN_X/Y instead of DESIGN_X/Y from fiberassign (`PR #512`_).
+
+.. _`PR #508`: https://github.com/desihub/desisim/pull/508
+.. _`PR #512`: https://github.com/desihub/desisim/pull/512
+
+0.33.1 (2019-10-01)
+-------------------
+
+* *No code or API changes in this tag.*
+* Pinned Numpy version to fix broken tests (`PR #505`_).
+* Minor changes to documentation configuration and docstrings.
+
+.. _`PR #505`: https://github.com/desihub/desisim/pull/505
+
+0.33.0 (2019-09-30)
+-------------------
+
+* Running quickquasar on recent London mocks (`PR #495`_, `PR #497`_).
+* Update eBOSS to DR16 (`PR #498`_).
+* Updates to pixsim for SV (`PR #502`_).
+* Fix bug in counting repeat observations (`PR #503`_).
+
+.. _`PR #495`: https://github.com/desihub/desisim/pull/495
+.. _`PR #497`: https://github.com/desihub/desisim/pull/497
+.. _`PR #498`: https://github.com/desihub/desisim/pull/498
+.. _`PR #502`: https://github.com/desihub/desisim/pull/502
+.. _`PR #503`: https://github.com/desihub/desisim/pull/503
+
+
+0.32.0 (2019-05-30)
+-------------------
+
+* LyA/QSO sims updates (`PR #471`_, `PR #472`_, `PR #473`_, `PR #475`_,
+  `PR #478`_, `PR #483`_, `PR #485`_, `PR #488`_
+* Misc cleanup (`PR #480`, `PR #479`_,
+* Support new tile naming in quicksurvey (`PR #486`_).
+* Fix crashing bug in mock spectra OBJMETA tracking (`PR #490`_).
+* Support SV1_DESI_TARGET (`PR #494`_).
+
+.. _`PR #471`: https://github.com/desihub/desisim/pull/471
+.. _`PR #472`: https://github.com/desihub/desisim/pull/472
+.. _`PR #473`: https://github.com/desihub/desisim/pull/473
+.. _`PR #475`: https://github.com/desihub/desisim/pull/475
+.. _`PR #478`: https://github.com/desihub/desisim/pull/478
+.. _`PR #479`: https://github.com/desihub/desisim/pull/479
+.. _`PR #480`: https://github.com/desihub/desisim/pull/480
+.. _`PR #483`: https://github.com/desihub/desisim/pull/483
+.. _`PR #485`: https://github.com/desihub/desisim/pull/485
+.. _`PR #486`: https://github.com/desihub/desisim/pull/486
+.. _`PR #488`: https://github.com/desihub/desisim/pull/488
+.. _`PR #490`: https://github.com/desihub/desisim/pull/490
+.. _`PR #494`: https://github.com/desihub/desisim/pull/494
+
+0.31.2 (2019-02-28)
+-------------------
+
+* Update quickquasars default redshift error (`PR #466`_).
+* Support for London mocks v5.0 + DLAs (`PR #467`_).
+
+.. _`PR #466`: https://github.com/desihub/desisim/pull/466
+.. _`PR #467`: https://github.com/desihub/desisim/pull/467
+
+0.31.1 (2018-12-14)
+-------------------
+
+* quickquasars updates:
+
+  * support eBOSS (`PR #450`_).
+  * mimic redshift fitter uncertainties (`PR #452`_).
+  * adding shift to redshift (`PR #454`_).
+  * fix error in size of Z_noFOG (`PR #455`_).
+  * Fix quickquasars targetid truth (`PR #457`_).
+
+* Precompute colors for star and galaxy templates. (`PR #453`_).
+* Refactor S/N qa to load cframes only once (also updates OII for new TRUTH table) (`PR #459`_, `PR #465`_).
+* Use basis_templates v3.1 and matching desisim-testdata 0.6.1 (`PR #464`_).
+
+.. _`PR #450`: https://github.com/desihub/desisim/pull/450
+.. _`PR #452`: https://github.com/desihub/desisim/pull/452
+.. _`PR #453`: https://github.com/desihub/desisim/pull/453
+.. _`PR #454`: https://github.com/desihub/desisim/pull/454
+.. _`PR #455`: https://github.com/desihub/desisim/pull/455
+.. _`PR #457`: https://github.com/desihub/desisim/pull/457
+.. _`PR #459`: https://github.com/desihub/desisim/pull/459
+.. _`PR #464`: https://github.com/desihub/desisim/pull/464
+.. _`PR #465`: https://github.com/desihub/desisim/pull/465
+
+0.31.0 (2018-11-08)
+-------------------
+
+* Update to new fibermap format for consistency with targeting and
+  fiber assignment; requires desispec >= 0.26.0 (`PR #446`_).
+* Update `desisim.templates.BGS` to use latest selection cuts (`PR #439`_).
+* Fix quickquasar to work with Saclay mocks (`PR #435`_).
+* Add support for >v3.0 stellar templates, with notebook to boot (`PR #434`_).
+* Update notebook describing the construction of the LRG templates (`PR
+  #433`_).
+* Fix quicksurvey (`PR #431`_).
+* Update quickcat model (`PR #430`_, `PR #427`_).
+* Fix archetype computation for redrock (`PR #429`_).
+* Change ``electron`` to ``count`` for FITS compliance (`PR #428`_).
+* Do not include Mg II emission by default (`PR #426`_).
+* Add and adjust the nebular emission line spectra added to galaxy templates
+  (`PR #424`_).
+* quickquasar options for random z, ignoring transmission, random seeds,
+  desisim.templates.SIMQSO vs. QSO
+  (`PR #419`_, `PR #408`_, `PR #406`_, `PR #401`_).
+* Read and write `select_mock_targets` style `simspec` file (`PR #416`_).
+* Restore `quickquasars` to a functioning state, after being broken in `PR #409`_ (`PR #413`_).
+* Add optional `nside` and `overwrite` arguments to `wrap-newexp` and
+  `obs.new_exposure`, respectively (`PR #412`_).
+* Major (and backwards-incompatible) refactor of how the template/simulated
+  metadata are returned by desisim.templates (`PR #409`_).
+* Adding reading metals from LyA transmission files (`PR #407`_).
+
+.. _`PR #401`: https://github.com/desihub/desisim/pull/401
+.. _`PR #406`: https://github.com/desihub/desisim/pull/406
+.. _`PR #407`: https://github.com/desihub/desisim/pull/407
+.. _`PR #408`: https://github.com/desihub/desisim/pull/408
+.. _`PR #409`: https://github.com/desihub/desisim/pull/409
+.. _`PR #412`: https://github.com/desihub/desisim/pull/412
+.. _`PR #413`: https://github.com/desihub/desisim/pull/413
+.. _`PR #416`: https://github.com/desihub/desisim/pull/416
+.. _`PR #419`: https://github.com/desihub/desisim/pull/419
+.. _`PR #424`: https://github.com/desihub/desisim/pull/424
+.. _`PR #426`: https://github.com/desihub/desisim/pull/426
+.. _`PR #427`: https://github.com/desihub/desisim/pull/427
+.. _`PR #428`: https://github.com/desihub/desisim/pull/428
+.. _`PR #429`: https://github.com/desihub/desisim/pull/429
+.. _`PR #430`: https://github.com/desihub/desisim/pull/430
+.. _`PR #431`: https://github.com/desihub/desisim/pull/431
+.. _`PR #433`: https://github.com/desihub/desisim/pull/433
+.. _`PR #434`: https://github.com/desihub/desisim/pull/434
+.. _`PR #435`: https://github.com/desihub/desisim/pull/435
+.. _`PR #439`: https://github.com/desihub/desisim/pull/439
+.. _`PR #446`: https://github.com/desihub/desisim/pull/446
+
+0.30.0 (2018-08-09)
+-------------------
+
+* Update templates to DR7+ standard-star designation (FSTD-->STD) (`PR #400`_).
+* Update standard star bit name again STD -> STD_FAINT;
+  requires desitarget 0.23.0 (`PR #402`_).
+
+.. _`PR #400`: https://github.com/desihub/desisim/pull/400
+.. _`PR #402`: https://github.com/desihub/desisim/pull/402
+
+0.29.0 (2018-07-26)
+-------------------
+
+* Option in quickspectra to write the full sim table (`PR #392`_).
+* Option to use Gaussian instead of Poisson for QSO DLA.
+  Requires specsim >= v0.12 (`PR #393`_).
+* Use `overwrite` instead of `clobber` for `astropy.io.fits` (`PR #395`_).
+
+.. _`PR #392`: https://github.com/desihub/desisim/pull/392
+.. _`PR #393`: https://github.com/desihub/desisim/pull/393
+.. _`PR #395`: https://github.com/desihub/desisim/pull/395
+
+0.28.0 (2018-07-18)
 -------------------
 
 * Add BALs to templates.QSO class (`PR #321`_).
@@ -20,6 +190,9 @@ desisim change log
 * Add rest-frame option to templates.SIMQSO (`PR #377`_).
 * Optionally change output wave vector in templates.SIMQSO when noresample=True
   or restframe=True (`PR #383`_).
+* Fix ``newexp-mock`` and ``wrap-fastframe`` file parsing for ``NIGHT/EXPID/*.*``
+  vs. ``NIGHT/*.*``.
+* Speed up emission line simulation when using ``MKL >= 2018.0.2`` (`PR #390`_).
 
 .. _`PR #321`: https://github.com/desihub/desisim/pull/321
 .. _`PR #349`: https://github.com/desihub/desisim/pull/349
@@ -35,6 +208,7 @@ desisim change log
 .. _`PR #370`: https://github.com/desihub/desisim/pull/370
 .. _`PR #377`: https://github.com/desihub/desisim/pull/377
 .. _`PR #383`: https://github.com/desihub/desisim/pull/383
+.. _`PR #390`: https://github.com/desihub/desisim/pull/390
 
 0.27.0 (2018-03-29)
 -------------------
@@ -173,7 +347,7 @@ Requires desitarget < 0.19.0
 * Add BGS, MWS to z_find QA
 * Miscellaneous polishing in QA (velocity, clip before RMS, extend [OII] flux, S/N per Ang)
 * Bug fix: correctly select both "bright" and "faint" BGS templates by default
-  (`PR #257`_).  
+  (`PR #257`_).
 * Updates for newexp/fastframe wrappers for end-to-end sims (`PR #258`_).
 
 .. _`PR #250`: https://github.com/desihub/desisim/pull/250

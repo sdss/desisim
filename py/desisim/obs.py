@@ -33,7 +33,7 @@ def new_exposure(program, nspec=5000, night=None, expid=None, tileid=None,
                  nproc=None, seed=None, obsconditions=None,
                  specify_targets=dict(), testslit=False, exptime=None,
                  arc_lines_filename=None, flat_spectrum_filename=None,
-                 outdir=None, config='desi', telescope=None):
+                 outdir=None, config='desi', telescope=None, overwrite=False):
     """
     Create a new exposure and output input simulation files.
     Does not generate pixel-level simulations or noisy spectra.
@@ -58,9 +58,10 @@ def new_exposure(program, nspec=5000, night=None, expid=None, tileid=None,
         outdir (str, optional): output directory
         config (str, optional): the yaml configuration to load
         telescope (str, optional): the telescope used (i.e. 1m, 160mm)
+        overwrite (bool, optional): optionally clobber existing files
 
     Returns:
-        science: sim, fibermap, meta, obsconditions
+        science: sim, fibermap, meta, obsconditions, objmeta
 
     Writes to outdir or $DESI_SPECTRO_SIM/$PIXPROD/{night}/
 
@@ -128,13 +129,13 @@ def new_exposure(program, nspec=5000, night=None, expid=None, tileid=None,
         wave, phot, fibermap = desisim.simexp.simarc(arcdata, nspec=nspec, testslit=testslit)
 
         header['EXPTIME'] = exptime
-        desisim.io.write_simspec_arc(outsimspec, wave, phot, header, fibermap=fibermap)
+        desisim.io.write_simspec_arc(outsimspec, wave, phot, header, fibermap=fibermap, overwrite=overwrite)
 
         fibermap.meta['NIGHT'] = night
         fibermap.meta['EXPID'] = expid
         desispec.io.write_fibermap(outfibermap, fibermap)
         truth = dict(WAVE=wave, PHOT=phot, UNITS='photon')
-        return truth, fibermap, None, None
+        return truth, fibermap, None, None, None
 
     elif program == 'flat':
         if flat_spectrum_filename is None :
@@ -150,7 +151,7 @@ def new_exposure(program, nspec=5000, night=None, expid=None, tileid=None,
         header['EXPTIME'] = exptime
         header['FLAVOR'] = 'flat'
         desisim.io.write_simspec(sim, truth=None, fibermap=fibermap, obs=None,
-            expid=expid, night=night, header=header, filename=outsimspec)
+            expid=expid, night=night, header=header, filename=outsimspec, overwrite=overwrite)
 
         fibermap.meta['NIGHT'] = night
         fibermap.meta['EXPID'] = expid
@@ -160,11 +161,11 @@ def new_exposure(program, nspec=5000, night=None, expid=None, tileid=None,
         flux = sim.simulated['source_flux'].to(fluxunits)
         wave = sim.simulated['wavelength'].to('Angstrom')
         truth = dict(WAVE=wave, FLUX=flux, UNITS=str(fluxunits))
-        return truth, fibermap, None, None
+        return truth, fibermap, None, None, None
 
     #- all other programs
-    fibermap, (flux, wave, meta) = get_targets_parallel(nspec, program,
-        tileid=tileid, nproc=nproc, seed=seed, specify_targets=specify_targets, config=config, telescope=telescope)
+    fibermap, (flux, wave, meta, objmeta) = get_targets_parallel(nspec, program,
+                                                                 tileid=tileid, nproc=nproc, seed=seed, specify_targets=specify_targets, config=config, telescope=telescope)
 
     if obsconditions is None:
         if program in ['dark', 'lrg', 'qso']:
@@ -210,7 +211,8 @@ def new_exposure(program, nspec=5000, night=None, expid=None, tileid=None,
     hdr['DATE-OBS'] = (time.strftime('%FT%T', dateobs), 'Start of exposure')
 
     simfile = io.write_simspec(sim, meta, fibermap, obsconditions,
-        expid, night, header=hdr, filename=outsimspec)
+                               expid, night, objmeta=objmeta, header=hdr,
+                               filename=outsimspec, overwrite=overwrite)
 
     if not isinstance(fibermap, table.Table):
         fibermap = table.Table(fibermap)
@@ -221,7 +223,7 @@ def new_exposure(program, nspec=5000, night=None, expid=None, tileid=None,
 
     update_obslog(obstype='science', program=program, expid=expid, dateobs=dateobs, tileid=tileid)
 
-    return sim, fibermap, meta, obsconditions
+    return sim, fibermap, meta, obsconditions, objmeta
 
 #- Mapping of DESI objtype to things specter knows about
 def specter_objtype(desitype):
@@ -230,7 +232,7 @@ def specter_objtype(desitype):
     '''
     intype = np.atleast_1d(desitype)
     desi2specter = dict(
-        STAR='STAR', STD='STAR', STD_FSTAR='STAR', FSTD='STAR', MWS_STAR='STAR',
+        STAR='STAR', STD='STAR', MWS_STAR='STAR',
         LRG='LRG', ELG='ELG', QSO='QSO', QSO_BAD='STAR',
         BGS='LRG', # !!!
         SKY='SKY'

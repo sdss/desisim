@@ -14,6 +14,7 @@ import fitsio
 
 import desitarget
 import desitarget.targetmask
+from desitarget.targets import main_cmx_or_sv
 import desispec.io
 import desispec.io.util
 import desimodel.io
@@ -85,13 +86,13 @@ def simarc(arcdata, nspec=5000, nonuniform=False, testslit=False):
     fibermap.meta['FLAVOR'] = 'arc'
     fibermap['OBJTYPE'] = 'ARC'
 
-    x = fibermap['X_TARGET']
-    y = fibermap['Y_TARGET']
+    x = fibermap['FIBERASSIGN_X']
+    y = fibermap['FIBERASSIGN_Y']
     r = np.sqrt(x**2 + y**2)
 
     #-----
     #- Determine ratio of fiber sizes relative to larges fiber
-    fiber_area = fiber_area_arcsec2(fibermap['X_TARGET'], fibermap['Y_TARGET'])
+    fiber_area = fiber_area_arcsec2(x, y)
     size_ratio = fiber_area / np.max(fiber_area)
 
     #- Correct photons for fiber size
@@ -160,9 +161,9 @@ def simflat(flatfile, nspec=5000, nonuniform=False, exptime=10, testslit=False,
         fibermap = astropy.table.Table(desispec.io.empty_fibermap(nspec))
 
     fibermap.meta['FLAVOR'] = 'flat'
-    fibermap['OBJTYPE'] = 'FLAT'
-    x = fibermap['X_TARGET']
-    y = fibermap['Y_TARGET']
+    fibermap['OBJTYPE'] = 'FLT'
+    x = fibermap['FIBERASSIGN_X']
+    y = fibermap['FIBERASSIGN_Y']
     r = np.sqrt(x**2 + y**2)
     xy = np.vstack([x, y]).T * u.mm
 
@@ -302,47 +303,50 @@ def fibermeta2fibermap(fiberassign, meta):
     A future refactor will standardize the column names of fiber assignment,
     target catalogs, and fibermaps, but in the meantime this is needed.
     '''
-    from desitarget.targetmask import desi_mask
+    #- Handle DESI_TARGET vs. SV1_DESI_TARGET etc.
+    target_colnames, target_masks, survey = main_cmx_or_sv(fiberassign)
+    targetcol = target_colnames[0]  #- DESI_TARGET or SV1_DESI_TARGET
+    desi_mask = target_masks[0]     #- desi_mask or sv1_desi_mask
 
     #- Copy column names in common
     fibermap = desispec.io.empty_fibermap(len(fiberassign))
-    for c in ['FIBER', 'TARGETID', 'DESI_TARGET', 'BGS_TARGET', 'MWS_TARGET',
-              'BRICKNAME']:
+    for c in ['FIBER', 'TARGETID', 'BRICKNAME']:
         fibermap[c] = fiberassign[c]
 
-    #- MAG and FILTER; ignore warnings from negative flux
-    #- these are deprecated anyway and will be replaced with FLUX_G, FLUX_R,
-    #- etc. in the fibermap as well
-    with warnings.catch_warnings():
-        warnings.simplefilter('ignore')
+    for c in target_colnames:
+        fibermap[c] = fiberassign[c]
 
-        fibermap['FILTER'][:, :5] = \
-            ['DECAM_G', 'DECAM_R', 'DECAM_Z', 'WISE_W1', 'WISE_W2']
-        fibermap['MAG'][:, 0] = 22.5 - 2.5 * np.log10(meta['FLUX_G'].data)
-        fibermap['MAG'][:, 1] = 22.5 - 2.5 * np.log10(meta['FLUX_R'].data)
-        fibermap['MAG'][:, 2] = 22.5 - 2.5 * np.log10(meta['FLUX_Z'].data)
-        fibermap['MAG'][:, 3] = 22.5 - 2.5 * np.log10(meta['FLUX_W1'].data)
-        fibermap['MAG'][:, 4] = 22.5 - 2.5 * np.log10(meta['FLUX_W2'].data)
+    for band in ['G', 'R', 'Z', 'W1', 'W2']:
+        key = 'FLUX_'+band
+        fibermap[key] = meta[key]
+        #- TODO: FLUX_IVAR_*
 
     #- set OBJTYPE
     #- TODO: what about MWS science targets that are also standard stars?
-    stdmask = (desi_mask.STD_FSTAR | desi_mask.STD_WD | desi_mask.STD_BRIGHT)
-    isSTD = (fiberassign['DESI_TARGET'] & stdmask) != 0
-    isSKY = (fiberassign['DESI_TARGET'] & desi_mask.SKY) != 0
+    #- Loop over STD options for backwards/forwards compatibility
+    stdmask = 0
+    for name in ['STD', 'STD_FSTAR', 'STD_WD'
+                 'STD_FAINT', 'STD_FAINT_BEST',
+                 'STD_BRIGHT', 'STD_BRIGHT_BEST']:
+        if name in desi_mask.names():
+            stdmask |= desi_mask[name]
+
+    isSTD = (fiberassign[targetcol] & stdmask) != 0
+
+    isSKY = (fiberassign[targetcol] & desi_mask.SKY) != 0
     isSCI = (~isSTD & ~isSKY)
-    fibermap['OBJTYPE'][isSTD] = 'STD'
     fibermap['OBJTYPE'][isSKY] = 'SKY'
-    fibermap['OBJTYPE'][isSCI] = 'SCIENCE'
+    fibermap['OBJTYPE'][isSCI | isSTD] = 'TGT'
 
     fibermap['LAMBDAREF'] = 5400.0
-    fibermap['RA_TARGET'] = fiberassign['RA']
-    fibermap['DEC_TARGET'] = fiberassign['DEC']
-    fibermap['RA_OBS']   = fiberassign['RA']
-    fibermap['DEC_OBS']  = fiberassign['DEC']
-    fibermap['X_TARGET'] = fiberassign['XFOCAL_DESIGN']
-    fibermap['Y_TARGET'] = fiberassign['YFOCAL_DESIGN']
-    fibermap['X_FVCOBS'] = fiberassign['XFOCAL_DESIGN']
-    fibermap['Y_FVCOBS'] = fiberassign['YFOCAL_DESIGN']
+    fibermap['TARGET_RA'] = fiberassign['TARGET_RA']
+    fibermap['TARGET_DEC'] = fiberassign['TARGET_DEC']
+    fibermap['FIBER_RA']   = fiberassign['TARGET_RA']
+    fibermap['FIBER_DEC']  = fiberassign['TARGET_DEC']
+    fibermap['FIBERASSIGN_X'] = fiberassign['FIBERASSIGN_X']
+    fibermap['FIBERASSIGN_Y'] = fiberassign['FIBERASSIGN_Y']
+    fibermap['DELTA_X'] = 0.0
+    fibermap['DELTA_Y'] = 0.0
 
     #- TODO: POSITIONER -> LOCATION
     #- TODO: TARGETCAT (how should we propagate this info into here?)
@@ -363,7 +367,8 @@ def simulate_spectra(wave, flux, fibermap=None, obsconditions=None, redshift=Non
         wave (array): 1D wavelengths in Angstroms
         flux (array): 2D[nspec,nwave] flux in 1e-17 erg/s/cm2/Angstrom
             or astropy Quantity with flux units
-        fibermap (Table, optional): table from fiberassign or fibermap; uses X/YFOCAL_DESIGN, TARGETID, DESI_TARGET
+        fibermap (Table, optional): table from fiberassign or fibermap; uses
+            X/YFOCAL_DESIGN, TARGETID, DESI_TARGET
         obsconditions(dict-like, optional): observation metadata including
             SEEING (arcsec), EXPTIME (sec), AIRMASS,
             MOONFRAC (0-1), MOONALT (deg), MOONSEP (deg)
@@ -452,6 +457,7 @@ def simulate_spectra(wave, flux, fibermap=None, obsconditions=None, redshift=Non
 
     #- Extract fiber locations from meta Table -> xy[nspec,2]
     assert np.all(fibermap['FIBER'] == fiberpos['FIBER'][0:nspec])
+
     if 'XFOCAL_DESIGN' in fibermap.dtype.names:
         xy = np.vstack([fibermap['XFOCAL_DESIGN'], fibermap['YFOCAL_DESIGN']]).T * u.mm
     elif 'X' in fibermap.dtype.names:
@@ -633,28 +639,40 @@ def get_source_types(fibermap):
     so BGS targets get source_type = 'lrg' (!)
     '''
     from desiutil.log import get_logger
-    log = get_logger('DEBUG')
-    if 'DESI_TARGET' not in fibermap.dtype.names:
-        log.warning("DESI_TARGET not in fibermap table; using source_type='star' for everything")
+    log = get_logger()
+
+    if ('DESI_TARGET' not in fibermap.dtype.names) and \
+       ('SV1_DESI_TARGET' not in fibermap.dtype.names):
+        log.warning("(SV1_)DESI_TARGET not in fibermap table; using source_type='star' for everything")
         return np.array(['star',] * len(fibermap))
+
+    target_colnames, target_masks, survey = main_cmx_or_sv(fibermap)
+    targetcol = target_colnames[0]  #- DESI_TARGET or SV1_DESI_TARGET
+    tm = target_masks[0]     #- desi_mask or sv1_desi_mask
 
     source_type = np.zeros(len(fibermap), dtype='U4')
     assert np.all(source_type == '')
 
-    tm = desitarget.targetmask.desi_mask
     if 'TARGETID' in fibermap.dtype.names:
         unassigned = fibermap['TARGETID'] == -1
         source_type[unassigned] = 'sky'
 
-    source_type[(fibermap['OBJTYPE'] == 'FLAT')] = 'FLAT'
+    source_type[(fibermap['OBJTYPE'] == 'FLT')] = 'FLAT'
     source_type[(fibermap['OBJTYPE'] == 'ARC')] = 'ARC'
-    source_type[(fibermap['DESI_TARGET'] & tm.SKY) != 0] = 'sky'
-    source_type[(fibermap['DESI_TARGET'] & tm.ELG) != 0] = 'elg'
-    source_type[(fibermap['DESI_TARGET'] & tm.LRG) != 0] = 'lrg'
-    source_type[(fibermap['DESI_TARGET'] & tm.QSO) != 0] = 'qso'
-    source_type[(fibermap['DESI_TARGET'] & tm.BGS_ANY) != 0] = 'bgs'
-    starmask = tm.STD_FSTAR | tm.STD_WD | tm.STD_BRIGHT | tm.MWS_ANY
-    source_type[(fibermap['DESI_TARGET'] & starmask) != 0] = 'star'
+    source_type[(fibermap[targetcol] & tm.SKY) != 0] = 'sky'
+    source_type[(fibermap[targetcol] & tm.ELG) != 0] = 'elg'
+    source_type[(fibermap[targetcol] & tm.LRG) != 0] = 'lrg'
+    source_type[(fibermap[targetcol] & tm.QSO) != 0] = 'qso'
+    source_type[(fibermap[targetcol] & tm.BGS_ANY) != 0] = 'bgs'
+
+    starmask = 0
+    for name in ['STD', 'STD_FSTAR', 'STD_WD', 'MWS_ANY',
+                 'STD_FAINT', 'STD_FAINT_BEST',
+                 'STD_BRIGHT', 'STD_BRIGHT_BEST']:
+        if name in desitarget.targetmask.desi_mask.names():
+            starmask |= desitarget.targetmask.desi_mask[name]
+
+    source_type[(fibermap[targetcol] & starmask) != 0] = 'star'
 
     #- Simulate unassigned fibers as sky
     ## TODO: when fiberassign and desitarget are updated, use
@@ -706,7 +724,8 @@ def testslit_fibermap():
     nspectro=10
     testslit_nspec_per_spectro=20
     testslit_nspec = nspectro*testslit_nspec_per_spectro
-    fibermap = np.zeros(testslit_nspec, dtype=desispec.io.fibermap.fibermap_columns)
+    # fibermap = np.zeros(testslit_nspec, dtype=desispec.io.fibermap.fibermap_columns)
+    fibermap = desispec.io.empty_fibermap(testslit_nspec)
     fibermap['FIBER'] = np.zeros((testslit_nspec)).astype(int)
     fibermap['SPECTROID'] = np.zeros((testslit_nspec)).astype(int)
     for spectro in range(nspectro) :
@@ -727,10 +746,15 @@ def testslit_fibermap():
 #- MOVE THESE TO desitarget.mocks.io (?)
 #-------------------------------------------------------------------------
 
-def get_mock_spectra(fiberassign, mockdir=None):
+def get_mock_spectra(fiberassign, mockdir=None, nside=64, obscon=None):
     '''
     Args:
         fiberassign: table loaded from fiberassign tile file
+
+    Options:
+        mockdir (str): base directory under which files are found
+        nside (int): healpix nside for file directory grouping
+        obscon (str): (observing conditions) None/dark/bright extra dir level
 
     Returns (flux, wave, meta) tuple
     '''
@@ -738,23 +762,29 @@ def get_mock_spectra(fiberassign, mockdir=None):
     flux = None
     meta = None
     wave = None
+    objmeta = None
 
-    issky = (fiberassign['DESI_TARGET'] & desitarget.targetmask.desi_mask.SKY) != 0
+    target_colnames, target_masks, survey = main_cmx_or_sv(fiberassign)
+    targetcol = target_colnames[0]  #- DESI_TARGET or SV1_DESI_TARGET
+    desi_mask = target_masks[0]     #- desi_mask or sv1_desi_mask
+
+    issky = (fiberassign[targetcol] & desi_mask.SKY) != 0
     skyids = fiberassign['TARGETID'][issky]
 
     #- check several ways in which an unassigned fiber might appear
-    unassigned = np.isnan(fiberassign['RA'])
-    unassigned |= np.isnan(fiberassign['DEC'])
+    unassigned = np.isnan(fiberassign['TARGET_RA'])
+    unassigned |= np.isnan(fiberassign['TARGET_DEC'])
     unassigned |= (fiberassign['TARGETID'] < 0)
     ## TODO: check desi_mask.NO_TARGET once that bit exists
 
     for truthfile, targetids in zip(*targets2truthfiles(
-                        fiberassign[~unassigned], basedir=mockdir)):
+                        fiberassign[~unassigned], basedir=mockdir, nside=nside,
+                        obscon=obscon)):
 
         #- Sky fibers aren't in the truth files
         ok = ~np.in1d(targetids, skyids)
 
-        tmpflux, tmpwave, tmpmeta = read_mock_spectra(truthfile, targetids[ok])
+        tmpflux, tmpwave, tmpmeta, tmpobjmeta = read_mock_spectra(truthfile, targetids[ok])
 
         if flux is None:
             nwave = tmpflux.shape[1]
@@ -762,11 +792,23 @@ def get_mock_spectra(fiberassign, mockdir=None):
             meta = np.zeros(nspec, dtype=tmpmeta.dtype)
             meta['TARGETID'] = -1
             wave = tmpwave.astype('f8')
+            objmeta = dict()
+            for key in tmpobjmeta.keys():
+                objmeta[key] = list()
 
         ii = np.in1d(fiberassign['TARGETID'], tmpmeta['TARGETID'])
         flux[ii] = tmpflux
         meta[ii] = tmpmeta
         assert np.all(wave == tmpwave)
+
+        for key in tmpobjmeta.keys():
+            if key not in objmeta:
+                objmeta[key] = list()
+            objmeta[key].append(tmpobjmeta[key])
+
+    #- Stack the per-objtype meta tables
+    for key in objmeta.keys():
+        objmeta[key] = astropy.table.Table(np.hstack(objmeta[key]))
 
     #- Set meta['TARGETID'] for sky fibers
     #- TODO: other things to set?
@@ -775,14 +817,14 @@ def get_mock_spectra(fiberassign, mockdir=None):
 
     assert np.all(fiberassign['TARGETID'] == meta['TARGETID'])
 
-    return flux, wave, astropy.table.Table(meta)
+    return flux, wave, astropy.table.Table(meta), objmeta
 
 def read_mock_spectra(truthfile, targetids, mockdir=None):
     '''
     Reads mock spectra from a truth file
 
     Args:
-        truthfile (str): full path to a mocks spectra_truth*.fits file
+        truthfile (str): full path to a mocks truth-\*.fits file
         targetids (array-like): targetids to load from that file
         mockdir: ???
 
@@ -803,10 +845,22 @@ def read_mock_spectra(truthfile, targetids, mockdir=None):
     #     truth = fx['TRUTH'].data
     #     wave = fx['WAVE'].data
     #     flux = fx['FLUX'].data
+    objtruth = dict()
     with fitsio.FITS(truthfile) as fx:
         truth = fx['TRUTH'].read()
         wave = fx['WAVE'].read()
         flux = fx['FLUX'].read()
+
+        if 'OBJTYPE' in truth.dtype.names:
+            # output of desisim.obs.new_exposure
+            objtype = [oo.decode('ascii').strip().upper() for oo in truth['OBJTYPE']] 
+        else:
+            # output of desitarget.mock.build.write_targets_truth
+            objtype = [oo.decode('ascii').strip().upper() for oo in truth['TEMPLATETYPE']] 
+        for obj in set(objtype):
+            extname = 'TRUTH_{}'.format(obj)
+            if extname in fx:
+                objtruth[obj] = fx[extname].read()
 
     missing = np.in1d(targetids, truth['TARGETID'], invert=True)
     if np.any(missing):
@@ -817,10 +871,15 @@ def read_mock_spectra(truthfile, targetids, mockdir=None):
     ii = np.in1d(truth['TARGETID'], targetids)
     flux = flux[ii]
     truth = truth[ii]
+    if bool(objtruth):
+        for obj in objtruth.keys():
+            ii = np.in1d(objtruth[obj]['TARGETID'], targetids)
+            objtruth[obj] = objtruth[obj][ii]
 
     assert set(targetids) == set(truth['TARGETID'])
 
     #- sort truth to match order of input targetids
+    # it doesn't matter if objtruth is sorted
     if len(targetids) == len(truth['TARGETID']):
         i = np.argsort(targetids)
         j = np.argsort(truth['TARGETID'])
@@ -843,15 +902,19 @@ def read_mock_spectra(truthfile, targetids, mockdir=None):
     wave = desispec.io.util.native_endian(wave).astype(np.float64)
     reordered_flux = desispec.io.util.native_endian(reordered_flux).astype(np.float64)
 
-    return reordered_flux, wave, reordered_truth
+    return reordered_flux, wave, reordered_truth, objtruth
 
-def targets2truthfiles(targets, basedir, nside=64):
+def targets2truthfiles(targets, basedir, nside=64, obscon=None):
     '''
     Return list of mock truth files that contain these targets
 
     Args:
         targets: table with TARGETID column, e.g. from fiber assignment
         basedir: base directory under which files are found
+
+    Options:
+        nside (int): healpix nside for file directory grouping
+        obscon (str): (observing conditions) None/dark/bright extra dir level
 
     Returns (truthfiles, targetids):
         truthfiles: list of truth filenames
@@ -867,14 +930,15 @@ def targets2truthfiles(targets, basedir, nside=64):
     #- TODO: what should be done with assignments without targets?
     targets = targets[targets['TARGETID'] != -1]
 
-    theta = np.radians(90-targets['DEC'])
-    phi = np.radians(targets['RA'])
+    theta = np.radians(90-targets['TARGET_DEC'])
+    phi = np.radians(targets['TARGET_RA'])
     pixels = healpy.ang2pix(nside, theta, phi, nest=True)
 
     truthfiles = list()
     targetids = list()
     for ipix in sorted(np.unique(pixels)):
-        filename = mockio.findfile('truth', nside, ipix, basedir=basedir)
+        filename = mockio.findfile('truth', nside, ipix,
+                                   basedir=basedir, obscon=obscon)
         truthfiles.append(filename)
         ii = (pixels == ipix)
         targetids.append(np.asarray(targets['TARGETID'][ii]))

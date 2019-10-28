@@ -14,6 +14,9 @@ import random
 from time import asctime
 import socket
 
+from astropy.time import Time
+import astropy.units as u
+
 import numpy as np
 
 import desimodel.io
@@ -46,23 +49,6 @@ def simulate_exposure(simspecfile, rawfile, cameras=None,
 
     For a lower-level pixel simulation interface that doesn't perform I/O,
     see pixsim.simulate()
-<<<<<<< HEAD
-    """
-    # - night, expid, camera -> input file names
-    simspecfile = io.findfile('simspec', night=night, expid=expid)
-
-    # - Read inputs
-    psf = desimodel.io.load_psf(camera[0])
-    simspec = io.read_simspec(simspecfile)
-
-    # - Trim effective CCD size; mainly to limit memory for testing
-    if ccdshape is not None:
-        psf.npix_y, psf.npix_x = ccdshape
-
-    if 'cosmics' in kwargs:
-        shape = (psf.npix_y, psf.npix_x)
-        kwargs['cosmics'] = io.read_cosmics(kwargs['cosmics'], expid, shape=shape)
-=======
 
     Note: call desi_preproc or desispec.preproc.preproc to pre-process the
     output desi*.fits file for overscan subtraction, noise estimation, etc.
@@ -96,7 +82,6 @@ def simulate_exposure(simspecfile, rawfile, cameras=None,
             if len(cameras) % num_nodes != 0:
                 raise ValueError('Number of cameras {} should be evenly divisible by number of nodes {}'.format(
                     len(cameras), num_nodes))
->>>>>>> upstream/master
 
     if comm is not None:
         cameras = comm.bcast(cameras, root=0)
@@ -137,6 +122,7 @@ def simulate_exposure(simspecfile, rawfile, cameras=None,
         #- rank must read it instead of rank 0 read + bcast
         channel = camera[0]
         if channel not in psfs:
+            log.info('Reading {} PSF at {}'.format(channel, asctime()))
             psfs[channel] = desimodel.io.load_psf(channel)
 
             #- Trim effective CCD size; mainly to limit memory for testing
@@ -150,10 +136,13 @@ def simulate_exposure(simspecfile, rawfile, cameras=None,
         if previous_channel != channel:
             if (addcosmics is True) and (node_rank == 0):
                 cosmics_file = io.find_cosmics(camera, simspec.header['EXPTIME'])
-                log.info('cosmics templates {}'.format(cosmics_file))
+                log.info('Reading cosmics templates {} at {}'.format(
+                    cosmics_file, asctime()))
                 shape = (psf.npix_y, psf.npix_x)
                 cosmics = io.read_cosmics(cosmics_file, expid, shape=shape)
             if (addcosmics is True) and (comm_node is not None):
+                if node_rank == 0:
+                    log.info('Broadcasting cosmics at {}'.format(asctime()))
                 cosmics = comm_node.bcast(cosmics, root=0)
             else:
                 log.debug("Cosmics not requested")
@@ -183,15 +172,9 @@ def simulate_exposure(simspecfile, rawfile, cameras=None,
                 io.write_simpix(simpixfile, truepix, camera=camera,
                                 meta=image.meta)
 
-<<<<<<< HEAD
-    # - Outputs; force "real" data files into simulation directory
-    simpixfile = io.findfile('simpix', night=night, expid=expid, camera=camera)
-    io.write_simpix(simpixfile, truepix, camera=camera, meta=image.meta)
-=======
         if rank == 0:
             log.info('Wrote {}'.format(rawfile))
             log.debug('done at {}'.format(asctime()))
->>>>>>> upstream/master
 
         previous_channel = channel
 
@@ -200,13 +183,8 @@ def simulate_exposure(simspecfile, rawfile, cameras=None,
         os.rename(tmprawfile, rawfile)
 
 
-<<<<<<< HEAD
-def simulate(camera, simspec, psf, fibers=None, nspec=None, ncpu=None,
-             cosmics=None, wavemin=None, wavemax=None, preproc=True, comm=None):
-=======
 def simulate(camera, simspec, psf, nspec=None, ncpu=None,
     cosmics=None, wavemin=None, wavemax=None, preproc=True, comm=None):
->>>>>>> upstream/master
     """Run pixel-level simulation of input spectra
 
     Args:
@@ -247,37 +225,6 @@ def simulate(camera, simspec, psf, nspec=None, ncpu=None,
     # - this is not necessarily true, the truth in is the fibermap
     nfibers = params['spectro']['nfibers']
 
-<<<<<<< HEAD
-    if fibers is not None:
-        fibers = np.asarray(fibers)
-        allphot = simspec.phot[channel] + simspec.skyphot[channel]
-
-        # - Trim to just fibers on this spectrograph
-        ii = np.where(fibers // 500 == ispec)[0]
-        fibers = fibers[ii]
-
-        phot = np.zeros((nfibers, allphot.shape[1]))
-        phot[fibers % 500] = allphot[ii]
-    else:
-        if ispec * nfibers >= simspec.nspec:
-            msg = "camera {} not covered by simspec with {} spectra".format(
-                camera, simspec.nspec)
-            log.error(msg)
-            raise ValueError(msg)
-
-        phot = simspec.phot[channel] + simspec.skyphot[channel]
-
-        # - Trim to just the fibers for this spectrograph
-        if nspec is None:
-            ii = slice(nfibers * ispec, nfibers * (ispec + 1))
-        else:
-            ii = slice(nfibers * ispec, nfibers * ispec + nspec)
-
-        phot = phot[ii]
-
-    # - Trim wavelenths if needed
-    wave = simspec.wave[channel]
-=======
     phot = simspec.cameras[camera].phot
     if simspec.cameras[camera].skyphot is not None:
         phot += simspec.cameras[camera].skyphot
@@ -289,7 +236,6 @@ def simulate(camera, simspec, psf, nspec=None, ncpu=None,
 
     #- Trim wavelengths if needed
     wave = simspec.cameras[camera].wave
->>>>>>> upstream/master
     if wavemin is not None:
         ii = (wave >= wavemin)
         phot = phot[:, ii]
@@ -299,15 +245,7 @@ def simulate(camera, simspec, psf, nspec=None, ncpu=None,
         phot = phot[:, ii]
         wave = wave[ii]
 
-<<<<<<< HEAD
-    # - check if simulation has less than 500 input spectra
-    if phot.shape[0] < nspec:
-        nspec = phot.shape[0]
-
-    # - Project to image and append that to file
-=======
     #- Project to image and append that to file
->>>>>>> upstream/master
     if (comm is None) or (comm.rank == 0):
         log.info('Starting {} projection at {}'.format(camera, asctime()))
 
@@ -327,9 +265,6 @@ def simulate(camera, simspec, psf, nspec=None, ncpu=None,
         header['DOSVER'] = 'SIM'
         header['FEEVER'] = 'SIM'
         header['DETECTOR'] = 'SIM'
-        gain = params['ccd'][channel]['gain']
-        for amp in ('1', '2', '3', '4'):
-            header['GAIN' + amp] = gain
 
         # - Add cosmics from library of dark images
         ny = truepix.shape[0] // 2
@@ -338,23 +273,21 @@ def simulate(camera, simspec, psf, nspec=None, ncpu=None,
             # set to zeros values with mask bit 0 (= dead column or hot pixels)
             cosmics_pix = cosmics.pix * ((cosmics.mask & 1) == 0)
             pix = np.random.poisson(truepix) + cosmics_pix
-            header['RDNOISE1'] = cosmics.meta['RDNOISE1']
-            header['RDNOISE2'] = cosmics.meta['RDNOISE2']
-            header['RDNOISE3'] = cosmics.meta['RDNOISE3']
-            header['RDNOISE4'] = cosmics.meta['RDNOISE4']
+            try:  #- cosmics templates >= v0.3
+                rdnoiseA = cosmics.meta['OBSRDNA']
+                rdnoiseB = cosmics.meta['OBSRDNB']
+                rdnoiseC = cosmics.meta['OBSRDNC']
+                rdnoiseD = cosmics.meta['OBSRDND']
+            except KeyError:  #- cosmics templates <= v0.2
+                print(cosmic.meta)
+                rdnoiseA = cosmics.meta['RDNOISE0']
+                rdnoiseB = cosmics.meta['RDNOISE1']
+                rdnoiseC = cosmics.meta['RDNOISE2']
+                rdnoiseD = cosmics.meta['RDNOISE3']
         else:
             pix = truepix
             readnoise = params['ccd'][channel]['readnoise']
-            header['RDNOISE1'] = readnoise
-            header['RDNOISE2'] = readnoise
-            header['RDNOISE3'] = readnoise
-            header['RDNOISE4'] = readnoise
-
-        # if (comm is None) or (comm.rank == 0):
-        #     log.info('RDNOISE1 {}'.format(header['RDNOISE1']))
-        #     log.info('RDNOISE2 {}'.format(header['RDNOISE2']))
-        #     log.info('RDNOISE3 {}'.format(header['RDNOISE3']))
-        #     log.info('RDNOISE4 {}'.format(header['RDNOISE4']))
+            rdnoiseA = rdnoiseB = rdnoiseC = rdnoiseD = readnoise
 
         # - data already has noise if cosmics were added
         noisydata = (cosmics is not None)
@@ -366,33 +299,51 @@ def simulate(camera, simspec, psf, nspec=None, ncpu=None,
         else:
             noverscan = 50
 
+        #- Reproducibly random overscan bias level offsets across diff exp
+        assert channel in 'brz'
+        if channel == 'b':
+            irand = ispec
+        elif channel == 'r':
+            irand = 10 + ispec
+        elif channel == 'z':
+            irand = 20 + ispec
+
+        seeds = np.random.RandomState(0).randint(2**32-1, size=30)
+        rand = np.random.RandomState(seeds[irand])
+
         nyraw = ny
         nxraw = nx + nprescan + noverscan
         rawpix = np.empty((nyraw * 2, nxraw * 2), dtype=np.int32)
 
-        # - Amp 0 Lower Left
+        gain = params['ccd'][channel]['gain']
+
+        #- Amp A/1 Lower Left
         rawpix[0:nyraw, 0:nxraw] = \
-            photpix2raw(pix[0:ny, 0:nx], gain, header['RDNOISE1'],
-                        readorder='lr', nprescan=nprescan, noverscan=noverscan,
-                        noisydata=noisydata)
+            photpix2raw(pix[0:ny, 0:nx], gain, rdnoiseA,
+                readorder='lr', nprescan=nprescan, noverscan=noverscan,
+                offset=rand.uniform(100, 200),
+                noisydata=noisydata)
 
-        # - Amp 2 Lower Right
-        rawpix[0:nyraw, nxraw:nxraw + nxraw] = \
-            photpix2raw(pix[0:ny, nx:nx + nx], gain, header['RDNOISE2'],
-                        readorder='rl', nprescan=nprescan, noverscan=noverscan,
-                        noisydata=noisydata)
+        #- Amp B/2 Lower Right
+        rawpix[0:nyraw, nxraw:nxraw+nxraw] = \
+            photpix2raw(pix[0:ny, nx:nx+nx], gain, rdnoiseB,
+                readorder='rl', nprescan=nprescan, noverscan=noverscan,
+                offset=rand.uniform(100, 200),
+                noisydata=noisydata)
 
-        # - Amp 3 Upper Left
-        rawpix[nyraw:nyraw + nyraw, 0:nxraw] = \
-            photpix2raw(pix[ny:ny + ny, 0:nx], gain, header['RDNOISE3'],
-                        readorder='lr', nprescan=nprescan, noverscan=noverscan,
-                        noisydata=noisydata)
+        #- Amp C/3 Upper Left
+        rawpix[nyraw:nyraw+nyraw, 0:nxraw] = \
+            photpix2raw(pix[ny:ny+ny, 0:nx], gain, rdnoiseC,
+                readorder='lr', nprescan=nprescan, noverscan=noverscan,
+                offset=rand.uniform(100, 200),
+                noisydata=noisydata)
 
-        # - Amp 4 Upper Right
-        rawpix[nyraw:nyraw + nyraw, nxraw:nxraw + nxraw] = \
-            photpix2raw(pix[ny:ny + ny, nx:nx + nx], gain, header['RDNOISE4'],
-                        readorder='rl', nprescan=nprescan, noverscan=noverscan,
-                        noisydata=noisydata)
+        #- Amp D/4 Upper Right
+        rawpix[nyraw:nyraw+nyraw, nxraw:nxraw+nxraw] = \
+            photpix2raw(pix[ny:ny+ny, nx:nx+nx], gain, rdnoiseD,
+                readorder='rl', nprescan=nprescan, noverscan=noverscan,
+                offset=rand.uniform(100, 200),
+                noisydata=noisydata)
 
         def xyslice2header(xyslice):
             '''
@@ -401,44 +352,99 @@ def simulate(camera, simspec, psf, nspec=None, ncpu=None,
             e.g. xyslice2header(np.s_[0:10, 5:20]) -> '[6:20,1:10]'
             '''
             yy, xx = xyslice
-<<<<<<< HEAD
-            value = '[{}:{},{}:{}]'.format(xx.start + 1, xx.stop, yy.start + 1, yy.stop)
-=======
             value = '[{}:{},{}:{}]'.format(xx.start+1, xx.stop,
                                            yy.start+1, yy.stop)
->>>>>>> upstream/master
             return value
 
-        # - Amp order from DESI-1964
-        # -   3 4
-        # -   1 2
-        xoffset = nprescan + nx + noverscan
-        header['PRESEC1'] = xyslice2header(np.s_[0:nyraw, 0:0 + nprescan])
-        header['DATASEC1'] = xyslice2header(np.s_[0:nyraw, nprescan:nprescan + nx])
-        header['BIASSEC1'] = xyslice2header(np.s_[0:nyraw, nprescan + nx:nprescan + nx + noverscan])
-        header['CCDSEC1'] = xyslice2header(np.s_[0:ny, 0:nx])
+        #- Amp order from DESI-1964 (previously 1-4 instead of A-D)
+        #-   C D
+        #-   A B
+        xoffset = nprescan+nx+noverscan
+        header['PRESECA']  = xyslice2header(np.s_[0:nyraw, 0:0+nprescan])
+        header['DATASECA'] = xyslice2header(np.s_[0:nyraw, nprescan:nprescan+nx])
+        header['BIASSECA'] = xyslice2header(np.s_[0:nyraw, nprescan+nx:nprescan+nx+noverscan])
+        header['CCDSECA']  = xyslice2header(np.s_[0:ny, 0:nx])
 
-        header['PRESEC2'] = xyslice2header(np.s_[0:nyraw, xoffset + noverscan + nx:xoffset + noverscan + nx + nprescan])
-        header['DATASEC2'] = xyslice2header(np.s_[0:nyraw, xoffset + noverscan:xoffset + noverscan + nx])
-        header['BIASSEC2'] = xyslice2header(np.s_[0:nyraw, xoffset:xoffset + noverscan])
-        header['CCDSEC2'] = xyslice2header(np.s_[0:ny, nx:2 * nx])
+        header['PRESECB']  = xyslice2header(np.s_[0:nyraw, xoffset+noverscan+nx:xoffset+noverscan+nx+nprescan])
+        header['DATASECB'] = xyslice2header(np.s_[0:nyraw, xoffset+noverscan:xoffset+noverscan+nx])
+        header['BIASSECB'] = xyslice2header(np.s_[0:nyraw, xoffset:xoffset+noverscan])
+        header['CCDSECB']  = xyslice2header(np.s_[0:ny, nx:2*nx])
 
-        header['PRESEC3'] = xyslice2header(np.s_[nyraw:2 * nyraw, 0:0 + nprescan])
-        header['DATASEC3'] = xyslice2header(np.s_[nyraw:2 * nyraw, nprescan:nprescan + nx])
-        header['BIASSEC3'] = xyslice2header(np.s_[nyraw:2 * nyraw, nprescan + nx:nprescan + nx + noverscan])
-        header['CCDSEC3'] = xyslice2header(np.s_[ny:2 * ny, 0:nx])
+        header['PRESECC']  = xyslice2header(np.s_[nyraw:2*nyraw, 0:0+nprescan])
+        header['DATASECC'] = xyslice2header(np.s_[nyraw:2*nyraw, nprescan:nprescan+nx])
+        header['BIASSECC'] = xyslice2header(np.s_[nyraw:2*nyraw, nprescan+nx:nprescan+nx+noverscan])
+        header['CCDSECC']  = xyslice2header(np.s_[ny:2*ny, 0:nx])
 
-        header['PRESEC4'] = xyslice2header(np.s_[nyraw:2 * nyraw, xoffset + noverscan + nx:xoffset + noverscan + nx + nprescan])
-        header['DATASEC4'] = xyslice2header(np.s_[nyraw:2 * nyraw, xoffset + noverscan:xoffset + noverscan + nx])
-        header['BIASSEC4'] = xyslice2header(np.s_[nyraw:2 * nyraw, xoffset:xoffset + noverscan])
-        header['CCDSEC4'] = xyslice2header(np.s_[ny:2 * ny, nx:2 * nx])
+        header['PRESECD']  = xyslice2header(np.s_[nyraw:2*nyraw, xoffset+noverscan+nx:xoffset+noverscan+nx+nprescan])
+        header['DATASECD'] = xyslice2header(np.s_[nyraw:2*nyraw, xoffset+noverscan:xoffset+noverscan+nx])
+        header['BIASSECD'] = xyslice2header(np.s_[nyraw:2*nyraw, xoffset:xoffset+noverscan])
+        header['CCDSECD']  = xyslice2header(np.s_[ny:2*ny, nx:2*nx])
+
+        #- Add additional keywords to mimic real raw data
+        header['INSTRUME'] = 'DESI'
+        header['PROCTYPE'] = 'RAW'
+        header['PRODTYPE'] = 'image'
+        header['EXPFRAME'] = 0
+        header['REQTIME'] = simspec.header['EXPTIME']
+        header['TIMESYS'] = 'UTC'
+        #- DATE-OBS format YEAR-MM-DDThh:mm:ss.sss -> OBSID kpnoYEARMMDDthhmmss
+        header['OBSID']='kp4m'+header['DATE-OBS'][0:19].replace('-','').replace(':','').lower()
+        header['TIME-OBS'] = header['DATE-OBS'].split('T')[1]
+        header['DELTARA'] = 0.0
+        header['DELTADEC'] = 0.0
+        header['SPECGRPH'] = ispec
+        header['CCDNAME'] = 'CCDS' + str(ispec) + str(channel).upper()
+        header['CCDPREP'] = 'purge,clear'
+        header['CCDSIZE'] = str(rawpix.shape)
+        header['CCDTEMP'] = 850.0
+        header['CPUTEMP'] = 63.7
+        header['CASETEMP'] = 62.8
+        header['CCDTMING'] = 'sim_timing.txt'
+        header['CCDCFG'] = 'sim.cfg'
+        header['SETTINGS'] = 'sim_detectors.json'
+        header['VESSEL'] = 7  #- I don't know what this is
+        header['FEEBOX'] = 'sim097'
+        header['PGAGAIN'] = 5
+        header['OCSVER'] = 'SIM'
+        header['CONSTVER'] = 'SIM'
+        header['BLDTIME'] = 0.35
+        header['DIGITIME'] = 61.9
+
+        #- Remove some spurious header keywords from upstream
+        if 'BUNIT' in header and header['BUNIT'] == 'Angstrom':
+            del header['BUNIT']
+
+        if 'MJD' in header and 'MJD-OBS' not in header:
+            header['MJD-OBS'] = header['MJD']
+            del header['MJD']
+
+        for key in ['RA', 'DEC']:
+            if key in header:
+                del header[key]
+
+        #- Drive MJD-OBS from DATE-OBS if needed
+        if 'MJD-OBS' not in header:
+            header['MJD-OBS'] = Time(header['DATE-OBS']).mjd
+
+        #- from http://www-kpno.kpno.noao.edu/kpno-misc/mayall_params.html
+        kpno_longitude = -(111. + 35/60. + 59.6/3600) * u.deg
+
+        #- Convert DATE-OBS to sexigesimal (sigh) Local Sidereal Time
+        #- Use mean ST as close enough for sims to avoid nutation calc
+        t = Time(header['DATE-OBS'])
+        st = t.sidereal_time('mean', kpno_longitude).to('deg').value
+        hour = st/15
+        minute = (hour % 1)*60
+        second = (minute % 1)*60
+        header['ST'] = '{:02d}:{:02d}:{:0.3f}'.format(
+                int(hour), int(minute), second)
 
         if preproc:
             log.debug('Running preprocessing at {}'.format(asctime()))
             image = desispec.preproc.preproc(rawpix, header, primary_header=simspec.header)
         else:
             log.debug('Skipping preprocessing')
-            image = Image(np.zeros(rawpix.shape), np.zeros(rawpix.shape), meta=header)
+            image = Image(np.zeros(truepix.shape), np.zeros(truepix.shape), meta=header)
 
     if (comm is None) or (comm.rank == 0):
         log.info('Finished pixsim.simulate for camera {} at {}'.format(camera, asctime()))
@@ -545,11 +551,6 @@ def parallel_project(psf, wave, phot, specmin=0, ncpu=None, comm=None):
     img = None
     if comm is not None:
         # MPI version
-<<<<<<< HEAD
-        specs = np.arange(phot.shape[0], dtype=np.int32)
-        myspecs = np.array_split(specs, comm.size)[comm.rank]
-        myimg = psf.project(wave, phot[myspecs], specmin=(specmin + myspecs[0]))
-=======
 
         # Get a smaller communicator if not enough spectra
         nspec = phot.shape[0]
@@ -565,7 +566,6 @@ def parallel_project(psf, wave, phot, specmin=0, ncpu=None, comm=None):
         iispec = np.linspace(specmin, nspec, int(comm.size+1)).astype(int)
 
         args = list()
->>>>>>> upstream/master
         if comm.rank == 0:
             for i in range(comm.size):
                 if iispec[i+1] > iispec[i]:
@@ -612,16 +612,12 @@ def parallel_project(psf, wave, phot, specmin=0, ncpu=None, comm=None):
             # - xyrange, subimg = _project( [psf, wave, phot, specmin] )
             pool = mp.Pool(ncpu)
             xy_subimg = pool.map(_project, args)
-<<<<<<< HEAD
-            img = np.zeros((psf.npix_y, psf.npix_x))
-=======
 
             #print("xy_subimg from pool")
             #print(xy_subimg)
             #print(len(xy_subimg))
 
             img = np.zeros( (psf.npix_y, psf.npix_x) )
->>>>>>> upstream/master
             for xyrange, subimg in xy_subimg:
                 xmin, xmax, ymin, ymax = xyrange
                 img[ymin:ymax, xmin:xmax] += subimg
@@ -665,8 +661,10 @@ def get_nodes_per_exp(nnodes,nexposures,ncameras,user_nodes_per_comm_exp=None):
     #check if nframes is evenly divisible by nnodes
     nframes = ncameras*nexposures
     if nframes % nnodes !=0:
-        msg=("nframes {} must be evenly divisible by nnodes {}, try again".format(nframes, nnodes))
-        raise ValueError(msg)
+        ### msg=("nframes {} must be evenly divisible by nnodes {}, try again".format(nframes, nnodes))
+        ### raise ValueError(msg)
+        msg=("nframes {} is not evenly divisible by nnodes {}; packing will be inefficient".format(nframes, nnodes))
+        log.warning(msg)
     else:
         log.debug("nframes {} is evenly divisible by nnodes {}, check passed".format(nframes, nnodes))
 
@@ -696,8 +694,10 @@ def get_nodes_per_exp(nnodes,nexposures,ncameras,user_nodes_per_comm_exp=None):
 
     #finally check to make sure exposures*gcf/nnodes is an integer to avoid inefficient node use
     if (nexposures*nodes_per_comm_exp) % nnodes != 0:
-        msg=("nexposures {} * nodes_per_comm_exp {} does not divide evenly into nnodes {}, try again".format(nexposures, nodes_per_comm_exp, nnodes))
-        raise ValueError(msg)
+        ### msg=("nexposures {} * nodes_per_comm_exp {} does not divide evenly into nnodes {}, try again".format(nexposures, nodes_per_comm_exp, nnodes))
+        ### raise ValueError(msg)
+        msg=("nexposures {} * nodes_per_comm_exp {} does not divide evenly into nnodes {}; packing will be inefficient".format(nexposures, nodes_per_comm_exp, nnodes))
+        log.warning(msg)
     else:
         log.debug("nexposures {} * nodes_per_comm_exp {} divides evenly into nnodes {}, check passed".format(nexposures, nodes_per_comm_exp, nnodes))
 

@@ -21,10 +21,9 @@ import desimodel.io
 import desitarget
 from desispec.spectra import Spectra
 from desispec.resolution import Resolution
-import matplotlib.pyplot as plt
 
 def sim_spectra(wave, flux, program, spectra_filename, obsconditions=None,
-                sourcetype=None, targetid=None, redshift=None, expid=0, seed=0, skyerr=0.0, ra=None, dec=None, meta=None, fibermap_columns=None):
+                sourcetype=None, targetid=None, redshift=None, expid=0, seed=0, skyerr=0.0, ra=None, dec=None, meta=None, fibermap_columns=None, fullsim=False,use_poisson=True):
     """
     Simulate spectra from an input set of wavelength and flux and writes a FITS file in the Spectra format that can
     be used as input to the redshift fitter.
@@ -49,7 +48,8 @@ def sim_spectra(wave, flux, program, spectra_filename, obsconditions=None,
         dec : numpy array with targets Dec (deg)
         meta : dictionnary, saved in primary fits header of the spectra file 
         fibermap_columns : add these columns to the fibermap
-    
+        fullsim : if True, write full simulation data in extra file per camera
+        use_poisson : if False, do not use numpy.random.poisson to simulate the Poisson noise. This is useful to get reproducible random realizations.
     """
     log = get_logger()
     
@@ -78,7 +78,7 @@ def sim_spectra(wave, flux, program, spectra_filename, obsconditions=None,
     
     # add DESI_TARGET 
     tm = desitarget.targetmask.desi_mask
-    frame_fibermap['DESI_TARGET'][sourcetype=="star"]=tm.STD_FSTAR
+    frame_fibermap['DESI_TARGET'][sourcetype=="star"]=tm.STD_FAINT
     frame_fibermap['DESI_TARGET'][sourcetype=="lrg"]=tm.LRG
     frame_fibermap['DESI_TARGET'][sourcetype=="elg"]=tm.ELG
     frame_fibermap['DESI_TARGET'][sourcetype=="qso"]=tm.QSO
@@ -104,17 +104,17 @@ def sim_spectra(wave, flux, program, spectra_filename, obsconditions=None,
                        ['NIGHT', 'EXPID', 'TILEID'],
                        [np.int32(night), np.int32(expid), np.int32(tileid)],
                        )
-           
+
     for s in range(nspec):
         for tp in frame_fibermap.dtype.fields:
             spectra_fibermap[s][tp] = frame_fibermap[s][tp]
  
     if ra is not None :
-        spectra_fibermap["RA_TARGET"] = ra
-        spectra_fibermap["RA_OBS"]    = ra
+        spectra_fibermap["TARGET_RA"] = ra
+        spectra_fibermap["FIBER_RA"]    = ra
     if dec is not None :
-        spectra_fibermap["DEC_TARGET"] = dec
-        spectra_fibermap["DEC_OBS"]    = dec
+        spectra_fibermap["TARGET_DEC"] = dec
+        spectra_fibermap["FIBER_DEC"]    = dec
             
     if obsconditions is None:
         if program in ['dark', 'lrg', 'qso']:
@@ -179,7 +179,7 @@ def sim_spectra(wave, flux, program, spectra_filename, obsconditions=None,
         psfconvolve=True)
 
     random_state = np.random.RandomState(seed)
-    sim.generate_random_noise(random_state)
+    sim.generate_random_noise(random_state,use_poisson=use_poisson)
 
     scale=1e17
     specdata = None
@@ -190,7 +190,14 @@ def sim_spectra(wave, flux, program, spectra_filename, obsconditions=None,
         resolution[camera.name] = np.tile(R.to_fits_array(), [nspec, 1, 1])
 
     skyscale = skyerr * random_state.normal(size=sim.num_fibers)
-        
+
+    if fullsim :
+        for table in sim.camera_output :
+            band  = table.meta['name'].strip()[0]
+            table_filename=spectra_filename.replace(".fits","-fullsim-{}.fits".format(band))
+            table.write(table_filename,format="fits",overwrite=True)
+            print("wrote",table_filename)
+
     for table in sim.camera_output :
         
         wave = table['wavelength'].astype(float)
@@ -249,6 +256,7 @@ def parse(options=None):
     parser.add_argument('--seed', type=int, default=0, help="Random seed")
     parser.add_argument('--source-type', type=str, default=None, help="Source type (for fiber loss), among sky,elg,lrg,qso,bgs,star")
     parser.add_argument('--skyerr', type=float, default=0.0, help="Fractional sky subtraction error")
+    parser.add_argument('--fullsim',action='store_true',help="write full simulation data in extra file per camera, for debugging")
 
     if options is None:
         args = parser.parse_args()
@@ -345,5 +353,5 @@ def main(args=None):
     
     sim_spectra(input_wave, input_flux, args.program, obsconditions=obsconditions,
         spectra_filename=args.out_spectra,seed=args.seed,sourcetype=sourcetype,
-        skyerr=args.skyerr)
+        skyerr=args.skyerr,fullsim=args.fullsim)
     

@@ -54,8 +54,10 @@ class TestIO(unittest.TestCase):
         self.assertTrue(x.endswith(str(expid)))
         x = io.simdir(int(night), expid)
         self.assertTrue(x.endswith(str(expid)))
-        x = io.simdir(night, mkdir=True)
-        self.assertTrue(os.path.exists(x))
+
+        #- If providing night, must also provide expid
+        with self.assertRaises(ValueError):
+            x = io.simdir(night, mkdir=True)
 
     def test_findfile(self):
         night = '20150102'
@@ -112,7 +114,7 @@ class TestIO(unittest.TestCase):
     def test_read_cosmics(self):
         #- hardcoded cosmics version
         infile = (os.environ['DESI_ROOT'] +
-            '/spectro/templates/cosmics/v0.2/cosmics-bias-r.fits')
+            '/spectro/templates/cosmics/v0.3/cosmics-bias-r.fits')
 
         shape = (10, 11)
         c1 = io.read_cosmics(infile, expid=0, shape=shape, jitter=True)

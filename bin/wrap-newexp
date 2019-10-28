@@ -21,12 +21,13 @@ parser.add_argument('--mockdir', type=str, help="directory with mock targets and
 #- Optional
 parser.add_argument('--outdir', type=str, help="output directory")
 parser.add_argument('--tilefile', type=str, help="ASCII file with subset of tiles to process")
+parser.add_argument('--nside', help='healpixel organization scheme of the mock spectra', type=int, default=64)
 parser.add_argument('--force', action='store_true', help="force re-processing to overwrite pre-existing output files")
 parser.add_argument('--nonuniform', action='store_true', help="simulate non-uniform calibration screen illumination")
 parser.add_argument('--dryrun', action='store_true', help="print commands but don't run them")
 parser.add_argument('--mpi', action='store_true', help="use MPI parallelism")
-parser.add_argument('--start', metavar='YYYYMMDD', default='19000101', help="Start date (YEARMMDD).")
-parser.add_argument('--stop', metavar='YYYYMMDD', default='21000101', help="Stop date (YEARMMDD).")
+parser.add_argument('--start', metavar='YYYYMMDD', default=19000101, help="Start date (YEARMMDD).")
+parser.add_argument('--stop', metavar='YYYYMMDD', default=21000101, help="Stop date (YEARMMDD).")
 
 args = parser.parse_args()
 
@@ -51,8 +52,11 @@ from astropy.table import Table
 
 import desisim.io
 
-args.start = args.start.replace('-', '')
-args.stop = args.stop.replace('-', '')
+if type(args.start) == str:
+    args.start = args.start.replace('-', '')
+
+if type(args.start) == str:
+    args.stop = args.stop.replace('-', '')
 
 def read_tiles(filename):
     if filename.endswith('.fits'):
@@ -99,7 +103,8 @@ if comm is not None:
 if rank == 0:
     todo = obs[:0].copy()
     for thisobs in obs:
-        if (thisobs['NIGHT'] < args.start) or (args.stop <= thisobs['NIGHT']):
+        tonight = int(thisobs['NIGHT'])
+        if (tonight < args.start) or (args.stop <= tonight):
             continue
 
         simspec = desisim.io.findfile('simspec', thisobs['NIGHT'], thisobs['EXPID'])
@@ -115,8 +120,10 @@ else:
 if comm is not None:
     todo = comm.bcast(todo, root=0)
 
-#- Proceed with simulating exposures, using all ranks
+#- Track failures from each rank, starting out optimistically
+failed = False
 
+#- Proceed with simulating exposures, using all ranks
 if rank == 0:
     print('{} MPI ranks processing {}/{} exposures'.format(size, len(todo), len(obs)))
 
@@ -124,8 +131,8 @@ if rank < len(todo):
     for thisobs in todo[rank::size]:
         assert thisobs['FLAVOR'] in ('science', 'arc', 'flat')
         if thisobs['FLAVOR'] == 'science':
-            cmd = "newexp-mock --obslist {} --fiberassign {} --mockdir {}".format(
-                args.obslist, args.fiberassign, args.mockdir)
+            cmd = "newexp-mock --obslist {} --fiberassign {} --mockdir {} --nside {}".format(
+                args.obslist, args.fiberassign, args.mockdir, args.nside)
             if args.outdir is not None:
                 cmd = cmd + " --outdir {}".format(args.outdir)
             cmd = cmd + " --clobber --expid {}".format(thisobs['EXPID'])
@@ -163,6 +170,7 @@ if rank < len(todo):
                     print("SUCCESS: {} night {} expid {} took {:.1f} seconds".format(
                         cmd.split()[0], thisobs['NIGHT'], thisobs['EXPID'],  runtime))
                 else:
+                    failed = True
                     print('FAILED: night {} expid {}; see {}'.format(
                         thisobs['NIGHT'], thisobs['EXPID'], logfile))
 
@@ -174,7 +182,7 @@ if rank < len(todo):
             sys.stdout.flush()
 
 if comm is not None:
-    comm.barrier()
+    failed = comm.gather(failed, root=0)
 
 if rank == 0:
     import collections
@@ -183,6 +191,13 @@ if rank == 0:
     print('{:.1f} minutes for {} arc, {} flat, {} science exposures'.format(
         tottime/60, nflavor['arc'], nflavor['flat'], nflavor['science']
     ))
+    if np.any(failed):
+        print('Some ranks had failures')
 
 if comm is not None:
     MPI.Finalize()
+
+if np.any(failed):
+    sys.exit(1)
+else:
+    sys.exit(0)

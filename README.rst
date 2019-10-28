@@ -15,7 +15,7 @@ desisim
 Introduction
 ------------
 
-This is a fork of the desisim package designed to be used for LVM.
+**Deprecated for LVM developement until further notice.**  This is a fork of the desisim package designed to be used for LVM.
 
 This package contains scripts and packages for simulating DESI spectra.
 For full documentation, please visit `desisim on Read the Docs`_
